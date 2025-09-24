@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+
+// Ensure Node.js runtime for Buffer and formData file handling, especially in Android WebView uploads
+export const runtime = 'nodejs';
 // Define interfaces locally to avoid import issues
 interface File {
   id: string;
@@ -45,6 +48,33 @@ const validateFileType = (mimeType: string): boolean => {
   return allowedTypes.includes(mimeType);
 };
 
+const inferMimeFromFilename = (filename: string): string => {
+  const extension = (filename.split('.').pop() || '').toLowerCase();
+  switch (extension) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'pdf':
+      return 'application/pdf';
+    case 'doc':
+      return 'application/msword';
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'txt':
+      return 'text/plain';
+    case 'svg':
+      return 'image/svg+xml';
+    default:
+      return 'application/octet-stream';
+  }
+};
+
 const validateFileSize = (size: number): boolean => {
   const maxSize = 10 * 1024 * 1024; // 10MB for database storage (reduced from 20MB)
   return size <= maxSize;
@@ -75,7 +105,11 @@ export async function POST(request: NextRequest) {
     const metadata = metadataStr ? JSON.parse(metadataStr) : {};
     const originalName = file.name;
     const size = file.size;
-    const mimeType = file.type;
+    // Some Android WebViews may omit or misreport the MIME type; fall back to inferring from filename
+    const mimeTypeRaw = (file as any).type || '';
+    const mimeType = mimeTypeRaw && typeof mimeTypeRaw === 'string' && mimeTypeRaw.trim().length > 0
+      ? mimeTypeRaw
+      : inferMimeFromFilename(originalName);
 
     // Validate required fields
     if (!userId || !originalName || !size || !mimeType) {

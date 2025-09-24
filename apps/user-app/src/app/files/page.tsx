@@ -586,12 +586,12 @@ export default function FilesPage() {
                             </p>
                             {file.status === "processing" && file.processingStartedAt && (
                               <p className="text-sm text-blue-600">
-                                Processing since: {new Date(file.processingStartedAt).toLocaleDateString()}
+                                Processing since: {(() => { try { const d = new Date(file.processingStartedAt as any); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); } catch { return '—'; } })()}
                               </p>
                             )}
                             {file.status === "completed" && file.completedAt && (
                               <p className="text-sm text-green-600">
-                                Completed: {new Date(file.completedAt).toLocaleDateString()}
+                                Completed: {(() => { try { const d = new Date(file.completedAt as any); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); } catch { return '—'; } })()}
                               </p>
                             )}
                             {file.completedFile && (

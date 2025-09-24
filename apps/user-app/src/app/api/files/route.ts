@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
 
     // If fileId is provided, return single file
     if (fileId) {
-      
       const fileDoc = await adminDb.collection('files').doc(fileId).get();
       
       if (!fileDoc.exists) {
@@ -64,6 +63,26 @@ export async function GET(request: NextRequest) {
         };
       }
 
+      // If completed, include completed file data
+      let completedFile: any = null;
+      if (fileData.status === 'completed' && fileData.completedFileId) {
+        const completedDoc = await adminDb.collection('completedFiles').doc(fileData.completedFileId).get();
+        if (completedDoc.exists) {
+          const completedData = completedDoc.data();
+          completedFile = {
+            id: fileData.completedFileId,
+            filename: completedData?.filename || '',
+            originalName: completedData?.originalName || '',
+            size: completedData?.size || 0,
+            mimeType: completedData?.mimeType || '',
+            filePath: completedData?.filePath || '',
+            uploadedAt: completedData?.uploadedAt || '',
+            agentId: completedData?.agentId || '',
+            agentName: completedData?.agentName || ''
+          };
+        }
+      }
+
       const file = {
         id: fileDoc.id,
         userId: fileData.userId,
@@ -82,7 +101,10 @@ export async function GET(request: NextRequest) {
         agentResponse,
         hasResponse: !!fileData.responseFileURL,
         assignedAt: fileData.assignedAt,
-        respondedAt: fileData.respondedAt
+        respondedAt: fileData.respondedAt,
+        // Completed file data
+        completedFile,
+        completedFileId: fileData.completedFileId
       };
 
       return NextResponse.json({
@@ -224,8 +246,8 @@ export async function GET(request: NextRequest) {
       count: files.length
     };
 
-    // Cache the result for 5 minutes
-    setCached(cacheKey, result, 300000); // Cache for 5 minutes for better performance
+    // Cache the result for 15 seconds to keep user view fresh on agent updates
+    setCached(cacheKey, result, 15000);
 
     return NextResponse.json(result);
 

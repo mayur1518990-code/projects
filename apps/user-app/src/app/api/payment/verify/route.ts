@@ -85,3 +85,36 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Support Razorpay redirect/callback with GET for WebViews
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const razorpay_order_id = searchParams.get('razorpay_order_id');
+    const razorpay_payment_id = searchParams.get('razorpay_payment_id');
+    const razorpay_signature = searchParams.get('razorpay_signature');
+    const fileId = searchParams.get('fileId');
+    const userId = searchParams.get('userId');
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !fileId || !userId) {
+      return NextResponse.json(
+        { success: false, message: 'Missing required payment verification data' },
+        { status: 400 }
+      );
+    }
+
+    // Reuse POST logic by constructing a fake request body
+    const verifyReq = new Request(request.url, {
+      method: 'POST',
+      body: JSON.stringify({ razorpay_order_id, razorpay_payment_id, razorpay_signature, fileId, userId })
+    });
+    // Call POST verification internally
+    const result = await POST(verifyReq as any);
+    return result;
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, message: 'An error occurred while verifying payment (GET)' },
+      { status: 500 }
+    );
+  }
+}

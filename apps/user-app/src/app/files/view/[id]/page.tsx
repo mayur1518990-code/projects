@@ -16,6 +16,18 @@ interface FileData {
   uploadedAt: string;
   filePath: string;
   metadata: any;
+  completedFile?: {
+    id: string;
+    filename: string;
+    originalName: string;
+    size: number;
+    mimeType: string;
+    filePath: string;
+    uploadedAt: string;
+    agentId: string;
+    agentName: string;
+  } | null;
+  completedFileId?: string | null;
 }
 
 export default function ViewDocumentPage() {
@@ -71,8 +83,13 @@ export default function ViewDocumentPage() {
 
       setFile(fileResult.file);
 
-      // Fetch file content as blob for better performance
-      const contentResponse = await fetch(`/api/files/content?fileId=${fileId}&userId=${user.userId}`);
+      // Decide which content to fetch: agent-completed file (if available) or original upload
+      let contentResponse: Response;
+      if (fileResult.file?.status === 'completed' && fileResult.file?.completedFileId) {
+        contentResponse = await fetch(`/api/files/completed/${fileResult.file.completedFileId}/download?userId=${user.userId}`);
+      } else {
+        contentResponse = await fetch(`/api/files/content?fileId=${fileId}&userId=${user.userId}`);
+      }
       
       if (contentResponse.ok) {
         const blob = await contentResponse.blob();
@@ -85,7 +102,7 @@ export default function ViewDocumentPage() {
       // Cache the result
       fileCacheRef.current.set(cacheKey, {
         file: fileResult.file,
-        content: fileContent || '',
+        content: (fileContent || ''),
         timestamp: Date.now()
       });
 

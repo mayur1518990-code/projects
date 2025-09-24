@@ -122,3 +122,34 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Optional: GET callback endpoint to handle redirect flow and delegate to /api/payment/verify
+export async function GET(request: NextRequest) {
+  const url = new URL(request.url);
+  // When coming from redirect flow, Razorpay sends ids; include file/user if we added them in callback_url
+  const razorpay_order_id = url.searchParams.get('razorpay_order_id');
+  const razorpay_payment_id = url.searchParams.get('razorpay_payment_id');
+  const razorpay_signature = url.searchParams.get('razorpay_signature');
+  const fileId = url.searchParams.get('fileId');
+  const userId = url.searchParams.get('userId');
+
+  if (razorpay_order_id && razorpay_payment_id && razorpay_signature && fileId && userId) {
+    // Proxy to verify endpoint
+    const verifyUrl = new URL(request.url);
+    verifyUrl.pathname = verifyUrl.pathname.replace('/create-payment', '/verify');
+    const res = await fetch(verifyUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ razorpay_order_id, razorpay_payment_id, razorpay_signature, fileId, userId })
+    });
+
+    const data = await res.json();
+    // Redirect user to files page regardless, with a toast hint via query
+    const redirect = new URL('/files', url.origin);
+    redirect.searchParams.set('payment', data.success ? 'success' : 'failed');
+    return NextResponse.redirect(redirect.toString());
+  }
+
+  // Fallback redirect if no params found
+  return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+}

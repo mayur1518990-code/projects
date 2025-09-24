@@ -117,8 +117,14 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
 
       }
 
-      // Open Razorpay directly (like test button)
-      const options = {
+      // Detect Android WebView to prefer redirect flow (popup can fail in WebViews)
+      const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
+      const isAndroid = /Android/i.test(ua);
+      const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
+      const useRedirectFlow = isAndroid && isWebView;
+
+      // Open Razorpay with appropriate flow
+      const options: any = {
         key: "rzp_test_RJTmoYCxPGvgYd",
         amount: amount * 100, // Convert to paise
           currency: "INR",
@@ -239,6 +245,17 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           color: "#2563eb",
           },
         };
+
+      if (useRedirectFlow) {
+        // In WebViews, use redirect to Razorpay-hosted page and back to our callback
+        const query = new URLSearchParams({
+          fileId: fileId || '',
+          userId: user.userId,
+          amount: String(amount)
+        }).toString();
+        options.redirect = true;
+        options.callback_url = `/api/payment/callback?${query}`;
+      }
 
       if (process.env.NODE_ENV === 'development') {
 
