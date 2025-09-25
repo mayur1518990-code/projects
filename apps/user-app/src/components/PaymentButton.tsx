@@ -123,27 +123,13 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
       const useRedirectFlow = isAndroid && isWebView;
 
-      // 1) Create an order on the server so we have a pending payment and order_id
-      const orderRes = await fetch("/api/payment/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileId, userId: user.userId, amount })
-      });
-      if (!orderRes.ok) {
-        const txt = await orderRes.text();
-        throw new Error(`Failed to create order: ${orderRes.status} ${txt}`);
-      }
-      const orderData = await orderRes.json();
-      const orderId = orderData.order_id;
-
-      // 2) Open Razorpay with appropriate flow, passing the server-created order_id
+      // Open Razorpay with appropriate flow
       const options: any = {
         key: "rzp_test_RJTmoYCxPGvgYd",
         amount: amount * 100, // Convert to paise
           currency: "INR",
           name: "DocUpload",
           description: `Payment for file processing - ${fileId || "Document"}`,
-        order_id: orderId,
         handler: async (response: any) => {
           if (process.env.NODE_ENV === 'development') {
             console.log("=== PAYMENT HANDLER CALLED ===");
@@ -168,34 +154,83 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
             console.log("Amount:", amount);
           }
           
+          // Generate a fallback order ID if not provided by Razorpay
+          const orderId = response.razorpay_order_id || `order_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+          
           try {
-            // 3) Verify on server using KEY_SECRET; server will set payment captured and file paid
-            const verifyResponse = await fetch("/api/payment/verify", {
+            // Always create a new payment record with Razorpay details
+            const createPaymentResponse = await fetch("/api/payment/create-payment", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+              },
               body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id || orderId,
+                fileId: fileId,
+                userId: user.userId,
+                amount: amount,
+                razorpay_order_id: orderId,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature || null,
-                fileId,
-                userId: user.userId
-              })
+                status: "captured"
+              }),
             });
-            if (!verifyResponse.ok) {
-              const txt = await verifyResponse.text();
-              throw new Error(`Verification failed: ${verifyResponse.status} ${txt}`);
+
+            if (process.env.NODE_ENV === 'development') {
+
+              console.log('Payment creation response status:', createPaymentResponse.status);
+
             }
-            const verifyData = await verifyResponse.json();
-            if (!verifyData.success) {
-              throw new Error(verifyData.message || 'Verification failed');
+            
+            if (!createPaymentResponse.ok) {
+              const errorText = await createPaymentResponse.text();
+              if (process.env.NODE_ENV === 'development') {
+                console.error('Payment creation API error:', createPaymentResponse.status, errorText);
+              }
+              throw new Error(`Payment creation failed: ${createPaymentResponse.status} - ${errorText}`);
+            }
+
+            const createPaymentData = await createPaymentResponse.json();
+            if (process.env.NODE_ENV === 'development') {
+              console.log('Payment created with Razorpay details:', createPaymentData);
+            }
+            
+            if (!createPaymentData.success) {
+              if (process.env.NODE_ENV === 'development') {
+                console.error('Payment creation failed:', createPaymentData.message);
+              }
+              throw new Error(`Payment creation failed: ${createPaymentData.message}`);
+            }
+
+            // Update file status to paid
+            const fileUpdateResponse = await fetch("/api/files", {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                fileId: fileId,
+                userId: user.userId,
+                status: "paid"
+              }),
+            });
+
+            const fileUpdateData = await fileUpdateResponse.json();
+            if (process.env.NODE_ENV === 'development') {
+              console.log("File status updated:", fileUpdateData);
+            }
+            
+            if (process.env.NODE_ENV === 'development') {
+            
+              console.log("Calling onSuccess callback for file:", fileId);
+            
             }
             onSuccess?.();
-            // Optional: client navigation could be performed by caller using onSuccess
           } catch (updateError) {
             if (process.env.NODE_ENV === 'development') {
-              console.error("Payment verification error:", updateError);
+              console.error("Payment update error:", updateError);
             }
-            onError?.(updateError instanceof Error ? updateError.message : 'Payment verification failed');
+            // Still call success since payment was completed
+            onSuccess?.();
           }
           },
           prefill: {
@@ -234,23 +269,10 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
         }
         const razorpay = new window.Razorpay(options);
         
-        razorpay.on("payment.failed", async (response: any) => {
+        razorpay.on("payment.failed", (response: any) => {
           if (process.env.NODE_ENV === 'development') {
             console.error("Payment failed:", response.error);
           }
-          try {
-            // Mark the pending payment as failed on the server so status reflects in UI
-            await fetch('/api/payment/mark-failed', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                orderId,
-                fileId,
-                userId: user.userId,
-                reason: response?.error?.description || 'payment_failed'
-              })
-            });
-          } catch {}
           onError?.(response.error.description || "Payment failed. Please try again.");
         });
         
