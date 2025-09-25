@@ -275,17 +275,93 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Reuse POST logic by constructing a fake request body
-    const verifyReq = new Request(request.url, {
-      method: 'POST',
-      body: JSON.stringify({ razorpay_order_id, razorpay_payment_id, razorpay_signature, fileId, userId })
+    console.log('Mobile app payment verification:', {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature: razorpay_signature ? 'Present' : 'Missing',
+      fileId,
+      userId
     });
-    
-    // Call POST verification internally
-    const result = await POST(verifyReq as any);
-    
-    // If verification was successful, return a success page for mobile apps
-    if (result.status === 200) {
+
+    // Implement verification logic directly for mobile apps
+    try {
+      // Get file details to determine amount
+      const fileDoc = await adminDb.collection('files').doc(fileId).get();
+      if (!fileDoc.exists) {
+        console.error('File not found:', fileId);
+        return new NextResponse(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Payment Error</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+              .error { color: #e74c3c; }
+            </style>
+          </head>
+          <body>
+            <h2 class="error">Payment Error</h2>
+            <p>File not found. Please contact support.</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({type: 'payment_error', message: 'File not found'}, '*');
+                window.close();
+              } else if (window.parent !== window) {
+                window.parent.postMessage({type: 'payment_error', message: 'File not found'}, '*');
+              }
+            </script>
+          </body>
+          </html>
+        `, {
+          status: 404,
+          headers: { 'Content-Type': 'text/html' }
+        });
+      }
+      
+      const fileData = fileDoc.data();
+      const amount = fileData?.amount || 0;
+      
+      // Create payment record for mobile app
+      const paymentData = {
+        fileId,
+        userId,
+        amount: amount,
+        currency: 'INR',
+        status: 'captured',
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        paymentMethod: 'razorpay',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          userAgent: 'mobile-app',
+          ipAddress: null,
+          createdVia: 'mobile-verification'
+        }
+      };
+
+      const paymentRef = adminDb.collection('payments').doc();
+      const paymentId = paymentRef.id;
+
+      const paymentDocument = {
+        id: paymentId,
+        ...paymentData,
+      };
+
+      await paymentRef.set(paymentDocument);
+      console.log('Created payment record for mobile app:', paymentId);
+
+      // Update file status to paid
+      await adminDb.collection('files').doc(fileId).update({
+        status: 'paid',
+        updatedAt: new Date().toISOString(),
+      });
+
+      console.log('Payment verification successful for mobile app');
+      
+      // Return success page for mobile apps
       return new NextResponse(`
         <!DOCTYPE html>
         <html>
@@ -295,20 +371,20 @@ export async function GET(request: NextRequest) {
           <style>
             body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
             .success { color: #27ae60; }
-            .error { color: #e74c3c; }
           </style>
         </head>
         <body>
           <h2 class="success">Payment Successful!</h2>
           <p>Your payment has been processed successfully.</p>
           <p>File ID: ${fileId}</p>
+          <p>Payment ID: ${razorpay_payment_id}</p>
           <script>
             // For mobile apps, notify parent window of success
             if (window.opener) {
-              window.opener.postMessage({type: 'payment_success', fileId: '${fileId}'}, '*');
+              window.opener.postMessage({type: 'payment_success', fileId: '${fileId}', paymentId: '${razorpay_payment_id}'}, '*');
               window.close();
             } else if (window.parent !== window) {
-              window.parent.postMessage({type: 'payment_success', fileId: '${fileId}'}, '*');
+              window.parent.postMessage({type: 'payment_success', fileId: '${fileId}', paymentId: '${razorpay_payment_id}'}, '*');
             }
             
             // Auto-close after 3 seconds
@@ -322,40 +398,43 @@ export async function GET(request: NextRequest) {
         status: 200,
         headers: { 'Content-Type': 'text/html' }
       });
+      
+    } catch (error: any) {
+      console.error('Mobile app payment verification error:', error);
+      
+      return new NextResponse(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Payment Error</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error { color: #e74c3c; }
+          </style>
+        </head>
+        <body>
+          <h2 class="error">Payment Error</h2>
+          <p>An error occurred while processing your payment. Please try again.</p>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({type: 'payment_error', message: 'Verification failed'}, '*');
+              window.close();
+            } else if (window.parent !== window) {
+              window.parent.postMessage({type: 'payment_error', message: 'Verification failed'}, '*');
+            }
+          </script>
+        </body>
+        </html>
+      `, {
+        status: 500,
+        headers: { 'Content-Type': 'text/html' }
+      });
     }
     
-    // If verification failed, return error page
-    return new NextResponse(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Payment Failed</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-          .error { color: #e74c3c; }
-        </style>
-      </head>
-      <body>
-        <h2 class="error">Payment Failed</h2>
-        <p>Payment verification failed. Please contact support.</p>
-        <script>
-          // For mobile apps, notify parent window of failure
-          if (window.opener) {
-            window.opener.postMessage({type: 'payment_error', message: 'Verification failed'}, '*');
-            window.close();
-          } else if (window.parent !== window) {
-            window.parent.postMessage({type: 'payment_error', message: 'Verification failed'}, '*');
-          }
-        </script>
-      </body>
-      </html>
-    `, {
-      status: 400,
-      headers: { 'Content-Type': 'text/html' }
-    });
-    
   } catch (error: any) {
+    console.error('Mobile app payment verification error:', error);
+    
     return new NextResponse(`
       <!DOCTYPE html>
       <html>
@@ -371,7 +450,6 @@ export async function GET(request: NextRequest) {
         <h2 class="error">Payment Error</h2>
         <p>An error occurred while verifying payment. Please try again.</p>
         <script>
-          // For mobile apps, notify parent window of error
           if (window.opener) {
             window.opener.postMessage({type: 'payment_error', message: 'Verification error'}, '*');
             window.close();
