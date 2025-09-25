@@ -65,8 +65,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate a unique order ID (in real app, this would come from Razorpay API)
-    const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    // Create real order with Razorpay Orders API
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!keyId || !keySecret) {
+      return NextResponse.json(
+        { success: false, message: 'Razorpay keys not configured on server' },
+        { status: 500 }
+      );
+    }
+
+    const createOrderPayload = {
+      amount: Math.round(Number(amount) * 100), // paise
+      currency: 'INR',
+      receipt: `file_${fileId}_${Date.now()}`,
+      payment_capture: 1
+    } as any;
+
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+    const rpRes = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${auth}`
+      },
+      body: JSON.stringify(createOrderPayload)
+    });
+    if (!rpRes.ok) {
+      const txt = await rpRes.text();
+      return NextResponse.json(
+        { success: false, message: `Failed to create Razorpay order: ${rpRes.status} ${txt}` },
+        { status: 502 }
+      );
+    }
+    const rpOrder = await rpRes.json();
+    const orderId = rpOrder.id as string;
 
     // Create payment record in Firestore
     const paymentData: CreatePaymentData = {
@@ -117,7 +150,7 @@ export async function POST(request: NextRequest) {
       success: true,
       order_id: orderId,
       payment_id: paymentId,
-      amount: amount * 100, // Return amount in paise for Razorpay
+      amount: Math.round(Number(amount) * 100), // paise
       currency: 'INR'
     };
 
