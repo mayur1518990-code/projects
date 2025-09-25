@@ -2,15 +2,17 @@ import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
-// Initialize Firebase Admin
-const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/^"|"$/g, '') || '';
-console.log('Private key preview:', privateKey.substring(0, 50) + '...');
+// Normalize and parse the private key from env (handle escaped newlines from Vercel)
+const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY ?? '';
+const normalizedPrivateKey = rawPrivateKey
+  .replace(/^"|"$/g, '')
+  .replace(/\\n/g, '\n');
 
 const firebaseAdminConfig = {
   credential: cert({
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: privateKey,
+    privateKey: normalizedPrivateKey,
   }),
 };
 
