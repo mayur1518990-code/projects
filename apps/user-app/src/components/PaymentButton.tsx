@@ -123,6 +123,19 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
       const useRedirectFlow = isAndroid && isWebView;
 
+      // 1) Create a pending order so we have a record to update in verify route
+      const orderRes = await fetch("/api/payment/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, userId: user.userId, amount })
+      });
+      if (!orderRes.ok) {
+        const errText = await orderRes.text();
+        throw new Error(`Failed to create order: ${orderRes.status} - ${errText}`);
+      }
+      const orderData = await orderRes.json();
+      const createdOrderId = orderData?.order_id;
+
       // Open Razorpay with appropriate flow
       const options: any = {
         key: "rzp_test_RJTmoYCxPGvgYd",
@@ -130,6 +143,7 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           currency: "INR",
           name: "DocUpload",
           description: `Payment for file processing - ${fileId || "Document"}`,
+        order_id: createdOrderId,
         handler: async (response: any) => {
           if (process.env.NODE_ENV === 'development') {
             console.log("=== PAYMENT HANDLER CALLED ===");
@@ -154,8 +168,8 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
             console.log("Amount:", amount);
           }
           
-          // Generate a fallback order ID if not provided by Razorpay
-          const orderId = response.razorpay_order_id || `order_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+          // Use created order id (preferred) or response order id
+          const orderId = response.razorpay_order_id || createdOrderId || `order_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
           
           try {
             // Always create a new payment record with Razorpay details
