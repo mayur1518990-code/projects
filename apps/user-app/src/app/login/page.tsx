@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
@@ -14,6 +14,39 @@ export default function LoginPage() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Handle redirect-based Google sign-in result (for WebViews)
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (!result) return;
+        const user = result.user;
+
+        // Fetch or create user in Firestore
+        const userDoc = await getDoc(doc(db, 'user', user.uid));
+        if (!userDoc.exists()) {
+          const userData = {
+            userId: user.uid,
+            name: user.displayName || user.email?.split('@')[0] || 'User',
+            email: user.email || '',
+            phone: user.phoneNumber || '',
+            createdAt: new Date().toISOString(),
+          };
+          await setDoc(doc(db, 'user', user.uid), userData);
+          localStorage.setItem('user', JSON.stringify(userData));
+        } else {
+          const userData = userDoc.data();
+          localStorage.setItem('user', JSON.stringify(userData));
+        }
+
+        localStorage.setItem('token', await user.getIdToken());
+        window.location.href = "/";
+      } catch (e) {
+        // ignore if no redirect result or handle errors silently
+      }
+    })();
+  }, []);
 
   const validateEmail = useCallback((email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -107,7 +140,17 @@ export default function LoginPage() {
       provider.setCustomParameters({
         prompt: 'select_account'
       });
-      
+
+      // Detect Android WebView (popups are blocked and Google forbids embedded webview OAuth)
+      const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
+      const isAndroid = /Android/i.test(ua);
+      const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
+
+      if (isAndroid && isWebView) {
+        await signInWithRedirect(auth, provider);
+        return; // flow continues in getRedirectResult handler
+      }
+
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
@@ -146,6 +189,8 @@ export default function LoginPage() {
         errorMessage = 'Sign-in was cancelled. Please try again.';
       } else if (error.code === 'auth/popup-blocked') {
         errorMessage = 'Popup was blocked. Please allow popups and try again.';
+      } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
+        errorMessage = 'Sign-in not supported in this environment. Try using the system browser.';
       } else if (error.code === 'auth/unauthorized-domain') {
         errorMessage = 'This domain is not authorized. Please contact support.';
       } else if (error.code === 'auth/operation-not-allowed') {

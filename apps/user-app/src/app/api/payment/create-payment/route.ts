@@ -144,45 +144,12 @@ export async function GET(request: NextRequest) {
     });
 
     const data = await res.json();
-
-    // Log the callback outcome
-    try {
-      await adminDb.collection('payment_logs').add({
-        kind: 'callback',
-        source: 'create-payment:GET',
-        success: !!data?.success,
-        fileId,
-        userId,
-        razorpay_order_id,
-        razorpay_payment_id,
-        message: data?.message || null,
-        status: res.status,
-        userAgent: request.headers.get('user-agent') || null,
-        ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-        createdAt: new Date().toISOString()
-      });
-    } catch {}
-
-    // Redirect to status page with concise info
-    const redirect = new URL('/payment/status', url.origin);
+    // Redirect user to files page regardless, with a toast hint via query
+    const redirect = new URL('/files', url.origin);
     redirect.searchParams.set('payment', data.success ? 'success' : 'failed');
-    if (fileId) redirect.searchParams.set('fileId', fileId);
-    if (data?.message) redirect.searchParams.set('msg', encodeURIComponent(data.message));
     return NextResponse.redirect(redirect.toString());
   }
 
   // Fallback redirect if no params found
-  try {
-    await adminDb.collection('payment_logs').add({
-      kind: 'callback',
-      source: 'create-payment:GET',
-      success: false,
-      reason: 'missing_params',
-      query: Object.fromEntries(url.searchParams.entries()),
-      userAgent: request.headers.get('user-agent') || null,
-      ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-      createdAt: new Date().toISOString()
-    });
-  } catch {}
-  return NextResponse.redirect(new URL('/payment/status?payment=failed&code=missing_params', url.origin));
+  return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
 }

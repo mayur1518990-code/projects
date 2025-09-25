@@ -4,55 +4,27 @@ import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    // Accept JSON body if present, else fallback to query params (some WebViews send form/query)
-    let razorpay_order_id: string | null = null;
-    let razorpay_payment_id: string | null = null;
-    let razorpay_signature: string | null = null;
-    let fileId: string | null = null;
-    let userId: string | null = null;
-
-    try {
-      const body = await request.json();
-      razorpay_order_id = body?.razorpay_order_id ?? null;
-      razorpay_payment_id = body?.razorpay_payment_id ?? null;
-      razorpay_signature = body?.razorpay_signature ?? null;
-      fileId = body?.fileId ?? null;
-      userId = body?.userId ?? null;
-    } catch {}
+    const body = await request.json();
+    const { 
+      razorpay_order_id, 
+      razorpay_payment_id, 
+      razorpay_signature,
+      fileId,
+      userId 
+    } = body;
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !fileId || !userId) {
-      const url = new URL(request.url);
-      const qs = url.searchParams;
-      razorpay_order_id = razorpay_order_id || qs.get('razorpay_order_id');
-      razorpay_payment_id = razorpay_payment_id || qs.get('razorpay_payment_id');
-      razorpay_signature = razorpay_signature || qs.get('razorpay_signature');
-      fileId = fileId || qs.get('fileId');
-      userId = userId || qs.get('userId');
-    }
-
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !fileId || !userId) {
-      try {
-        await adminDb.collection('payment_logs').add({
-          kind: 'verify',
-          source: 'verify:POST',
-          success: false,
-          reason: 'missing_params',
-          userAgent: request.headers.get('user-agent') || null,
-          ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-          createdAt: new Date().toISOString()
-        });
-      } catch {}
       return NextResponse.json(
         { success: false, message: 'Missing required payment verification data' },
         { status: 400 }
       );
     }
 
-    // Verify the signature using Razorpay key secret
-    const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || '';
+    // Verify the signature using Razorpay key secret (not webhook secret)
+    const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
     if (!razorpayKeySecret) {
       return NextResponse.json(
-        { success: false, message: 'Server misconfiguration: missing Razorpay key secret' },
+        { success: false, message: 'Server misconfigured: missing RAZORPAY_KEY_SECRET' },
         { status: 500 }
       );
     }
@@ -65,19 +37,6 @@ export async function POST(request: NextRequest) {
     const isSignatureValid = expectedSignature === razorpay_signature;
 
     if (!isSignatureValid) {
-      try {
-        await adminDb.collection('payment_logs').add({
-          kind: 'verify',
-          source: 'verify:POST',
-          success: false,
-          reason: 'invalid_signature',
-          fileId,
-          userId,
-          razorpay_order_id,
-          razorpay_payment_id,
-          createdAt: new Date().toISOString()
-        });
-      } catch {}
       return NextResponse.json(
         { success: false, message: 'Invalid payment signature' },
         { status: 400 }
@@ -93,15 +52,31 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .get();
 
-    if (paymentsSnapshot.empty) {
-      return NextResponse.json(
-        { success: false, message: 'Payment record not found' },
-        { status: 404 }
-      );
+    let paymentDoc = paymentsSnapshot.docs[0];
+    if (!paymentDoc) {
+      // In redirect/WebView flow, the client handler may not have run yet.
+      // Create a minimal payment record now so we can mark it captured.
+      const newPaymentRef = adminDb.collection('payments').doc();
+      const paymentDocument = {
+        id: newPaymentRef.id,
+        fileId,
+        userId,
+        amount: null,
+        currency: 'INR',
+        status: 'created',
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        paymentMethod: 'razorpay',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          source: 'verify-fallback'
+        }
+      };
+      await newPaymentRef.set(paymentDocument);
+      paymentDoc = await newPaymentRef.get();
     }
-
-    const paymentDoc = paymentsSnapshot.docs[0];
-    const paymentData = paymentDoc.data();
 
     // Update payment status to captured
     await paymentDoc.ref.update({
@@ -126,18 +101,6 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    try {
-      await adminDb.collection('payment_logs').add({
-        kind: 'verify',
-        source: 'verify:POST',
-        success: false,
-        reason: 'exception',
-        error: typeof error === 'object' ? String(error) : error,
-        userAgent: request.headers.get('user-agent') || null,
-        ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-        createdAt: new Date().toISOString()
-      });
-    } catch {}
     return NextResponse.json(
       { success: false, message: 'An error occurred while verifying payment' },
       { status: 500 }
@@ -156,20 +119,10 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get('userId');
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !fileId || !userId) {
-      try {
-        await adminDb.collection('payment_logs').add({
-          kind: 'verify',
-          source: 'verify:GET',
-          success: false,
-          reason: 'missing_params',
-          query: Object.fromEntries(searchParams.entries()),
-          userAgent: request.headers.get('user-agent') || null,
-          ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-          createdAt: new Date().toISOString()
-        });
-      } catch {}
-      const origin = new URL(request.url).origin;
-      return NextResponse.redirect(`${origin}/payment/status?payment=failed&code=missing_params`);
+      return NextResponse.json(
+        { success: false, message: 'Missing required payment verification data' },
+        { status: 400 }
+      );
     }
 
     // Reuse POST logic by constructing a fake request body
@@ -179,44 +132,11 @@ export async function GET(request: NextRequest) {
     });
     // Call POST verification internally
     const result = await POST(verifyReq as any);
-    const data = await result.json();
-
-    try {
-      await adminDb.collection('payment_logs').add({
-        kind: 'verify',
-        source: 'verify:GET',
-        success: !!data?.success,
-        fileId,
-        userId,
-        razorpay_order_id,
-        razorpay_payment_id,
-        message: data?.message || null,
-        userAgent: request.headers.get('user-agent') || null,
-        ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-        createdAt: new Date().toISOString()
-      });
-    } catch {}
-
-    const origin = new URL(request.url).origin;
-    const redirect = new URL('/payment/status', origin);
-    redirect.searchParams.set('payment', data.success ? 'success' : 'failed');
-    if (fileId) redirect.searchParams.set('fileId', fileId);
-    if (data?.message) redirect.searchParams.set('msg', encodeURIComponent(data.message));
-    return NextResponse.redirect(redirect.toString());
+    return result;
   } catch (error: any) {
-    try {
-      await adminDb.collection('payment_logs').add({
-        kind: 'verify',
-        source: 'verify:GET',
-        success: false,
-        reason: 'exception',
-        error: typeof error === 'object' ? String(error) : error,
-        userAgent: request.headers.get('user-agent') || null,
-        ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null,
-        createdAt: new Date().toISOString()
-      });
-    } catch {}
-    const origin = new URL(request.url).origin;
-    return NextResponse.redirect(`${origin}/payment/status?payment=failed&code=exception`);
+    return NextResponse.json(
+      { success: false, message: 'An error occurred while verifying payment (GET)' },
+      { status: 500 }
+    );
   }
 }
