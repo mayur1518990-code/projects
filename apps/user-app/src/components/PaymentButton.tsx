@@ -20,6 +20,8 @@ interface RazorpayOptions {
   description: string;
   order_id: string;
   handler: (response: any) => void;
+  callback_url?: string;
+  redirect?: boolean;
   prefill?: {
     name?: string;
     email?: string;
@@ -124,8 +126,13 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const useRedirectFlow = isAndroid && isWebView;
 
       // Open Razorpay with appropriate flow
+      const siteOrigin =
+        (typeof window !== 'undefined' && window.location?.origin) ||
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        'https://projects-user-app.vercel.app';
+
       const options: any = {
-        key: "rzp_test_RJTmoYCxPGvgYd",
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
         amount: amount * 100, // Convert to paise
           currency: "INR",
           name: "DocUpload",
@@ -246,15 +253,17 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           },
         };
 
+      // Always set callback_url as absolute URL for consistency
+      const query = new URLSearchParams({
+        fileId: fileId || '',
+        userId: user.userId,
+        amount: String(amount)
+      }).toString();
+      options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
+
       if (useRedirectFlow) {
         // In WebViews, use redirect to Razorpay-hosted page and back to our callback
-        const query = new URLSearchParams({
-          fileId: fileId || '',
-          userId: user.userId,
-          amount: String(amount)
-        }).toString();
         options.redirect = true;
-        options.callback_url = `/api/payment/callback?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {
