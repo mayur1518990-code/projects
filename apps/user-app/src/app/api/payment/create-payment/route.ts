@@ -14,7 +14,23 @@ export async function POST(request: NextRequest) {
       status 
     } = body;
 
+    console.log('Create payment request:', {
+      fileId,
+      userId,
+      amount,
+      razorpay_order_id,
+      razorpay_payment_id: razorpay_payment_id ? 'Present' : 'Missing',
+      razorpay_signature: razorpay_signature ? 'Present' : 'Missing',
+      status
+    });
+
     if (!fileId || !userId || !amount || !razorpay_payment_id) {
+      console.error('Missing required payment data:', {
+        fileId: !!fileId,
+        userId: !!userId,
+        amount: !!amount,
+        razorpay_payment_id: !!razorpay_payment_id
+      });
       return NextResponse.json(
         { success: false, message: 'Missing required payment data' },
         { status: 400 }
@@ -116,8 +132,18 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
+    console.error('Create payment error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    
     return NextResponse.json(
-      { success: false, message: 'An error occurred while creating payment' },
+      { 
+        success: false, 
+        message: 'An error occurred while creating payment',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      },
       { status: 500 }
     );
   }
