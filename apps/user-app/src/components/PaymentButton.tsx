@@ -44,7 +44,7 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
   const [isLoading, setIsLoading] = useState(false);
   const [isRazorpayLoaded, setIsRazorpayLoaded] = useState(false);
 
-  // Load Razorpay script and handle mobile app messages
+  // Load Razorpay script
   useEffect(() => {
     // Check if Razorpay is already loaded
     if (window.Razorpay) {
@@ -76,70 +76,6 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       }
     };
   }, [onError]);
-
-  // Handle messages from mobile app payment windows
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (process.env.NODE_ENV === 'development') {
-        console.log("Received message:", event.data);
-        console.log("Message origin:", event.origin);
-        console.log("Message source:", event.source);
-      }
-      
-      // Handle payment success
-      if (event.data?.type === 'payment_success') {
-        if (process.env.NODE_ENV === 'development') {
-          console.log("Payment success message received from mobile app:", event.data);
-        }
-        
-        // Show success message to user
-        if (process.env.NODE_ENV === 'development') {
-          console.log("Calling onSuccess callback");
-        }
-        onSuccess?.();
-        
-        // Also try to refresh the page or update UI
-        setTimeout(() => {
-          if (process.env.NODE_ENV === 'development') {
-            console.log("Payment completed successfully, refreshing page...");
-          }
-          window.location.reload();
-        }, 1000);
-        
-      } else if (event.data?.type === 'payment_error') {
-        if (process.env.NODE_ENV === 'development') {
-          console.log("Payment error message received from mobile app:", event.data.message);
-        }
-        onError?.(event.data.message || "Payment failed. Please try again.");
-      }
-    };
-
-    // Add multiple event listeners for better compatibility
-    window.addEventListener('message', handleMessage);
-    
-    // Also listen for custom events
-    const handleCustomEvent = (event: CustomEvent) => {
-      if (process.env.NODE_ENV === 'development') {
-        console.log("Received custom event:", event.detail);
-      }
-      
-      if (event.detail?.type === 'payment_success') {
-        onSuccess?.();
-        setTimeout(() => window.location.reload(), 1000);
-      } else if (event.detail?.type === 'payment_error') {
-        onError?.(event.detail.message || "Payment failed. Please try again.");
-      }
-    };
-    
-    document.addEventListener('payment_success', handleCustomEvent as EventListener);
-    document.addEventListener('payment_error', handleCustomEvent as EventListener);
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      document.removeEventListener('payment_success', handleCustomEvent as EventListener);
-      document.removeEventListener('payment_error', handleCustomEvent as EventListener);
-    };
-  }, [onSuccess, onError]);
 
   const handlePayment = async () => {
     if (process.env.NODE_ENV === 'development') {
@@ -181,50 +117,15 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
 
       }
 
-      // Detect platform and environment
+      // Detect Android WebView to prefer redirect flow (popup can fail in WebViews)
       const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
       const isAndroid = /Android/i.test(ua);
       const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
-      const isAppxyz = /appxyz/i.test(ua) || window.location?.hostname?.includes('appxyz') || false;
-      
-      // Use redirect flow for Android WebViews and appxyz platform
-      const useRedirectFlow = (isAndroid && isWebView) || isAppxyz;
+      const useRedirectFlow = isAndroid && isWebView;
 
-      // Get the appropriate base URL for callbacks
-      const siteOrigin = (() => {
-        // For appxyz platform, use the original webapp URL
-        if (isAppxyz) {
-          return process.env.NEXT_PUBLIC_BASE_URL || 'https://projects-user-app.vercel.app';
-        }
-        // For regular webapp, use current origin
-        return (typeof window !== 'undefined' && window.location?.origin) ||
-               process.env.NEXT_PUBLIC_SITE_URL ||
-               process.env.NEXT_PUBLIC_BASE_URL ||
-               '';
-      })();
-
-      // Debug: Check if Razorpay key is available
-      const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_RJTmoYCxPGvgYd";
-      if (process.env.NODE_ENV === 'development') {
-        console.log("Environment variables check:");
-        console.log("- NODE_ENV:", process.env.NODE_ENV);
-        console.log("- NEXT_PUBLIC_RAZORPAY_KEY_ID:", process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID);
-        console.log("- Razorpay Key:", razorpayKey ? "Found" : "Missing");
-        console.log("- Key value:", razorpayKey);
-        console.log("- Using fallback key:", razorpayKey === "rzp_test_RJTmoYCxPGvgYd");
-      }
-      
-      if (!razorpayKey) {
-        const errorMsg = "Razorpay key not found. Please check NEXT_PUBLIC_RAZORPAY_KEY_ID environment variable.";
-        if (process.env.NODE_ENV === 'development') {
-          console.error(errorMsg);
-          console.error("Available env vars:", Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC')));
-        }
-        throw new Error(errorMsg);
-      }
-
+      // Open Razorpay with appropriate flow
       const options: any = {
-        key: razorpayKey,
+        key: "rzp_test_RJTmoYCxPGvgYd",
         amount: amount * 100, // Convert to paise
           currency: "INR",
           name: "DocUpload",
@@ -346,26 +247,16 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
         };
 
       if (useRedirectFlow) {
-        // In WebViews and appxyz platform, use redirect to Razorpay-hosted page and back to our callback
+        // In WebViews, use redirect to Razorpay-hosted page and back to our callback
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const query = new URLSearchParams({
           fileId: fileId || '',
           userId: user.userId,
           amount: String(amount)
         }).toString();
         options.redirect = true;
-        
-        // For appxyz platform, use a special callback URL that works with mobile apps
-        if (isAppxyz) {
-          // Use a simpler success endpoint for mobile apps
-          options.callback_url = `${siteOrigin}/api/payment/success?${query}`;
-        } else {
-          // For regular WebViews, use the standard callback
-          options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
-        }
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log("Using redirect flow with callback URL:", options.callback_url);
-        }
+        // Use absolute URL to avoid invalid callback in Android WebView wrappers
+        options.callback_url = `${origin}/api/payment/create-payment?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {
@@ -451,8 +342,3 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
     </button>
   );
 }
-
-
-
-
-

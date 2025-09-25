@@ -19,14 +19,6 @@ const nextConfig: NextConfig = {
     ];
   },
   serverExternalPackages: ['firebase-admin'],
-  eslint: {
-    // Skip ESLint errors during production builds (Vercel)
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    // Optionally skip type errors during builds; remove if you want strict CI
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;
