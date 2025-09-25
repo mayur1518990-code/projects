@@ -129,6 +129,12 @@ export async function POST(request: NextRequest) {
       success: true,
       payment_id: paymentId,
       message: 'Payment created successfully'
+    }, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      }
     });
 
   } catch (error: any) {
@@ -144,7 +150,14 @@ export async function POST(request: NextRequest) {
         message: 'An error occurred while creating payment',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        }
+      }
     );
   }
 }
@@ -178,4 +191,15 @@ export async function GET(request: NextRequest) {
 
   // Fallback redirect if no params found
   return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    }
+  });
 }

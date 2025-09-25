@@ -40,11 +40,11 @@ export async function POST(request: NextRequest) {
     let isSignatureValid = true;
     
     if (razorpayWebhookSecret && razorpayWebhookSecret !== 'your_webhook_secret') {
-      const bodyString = `${razorpay_order_id}|${razorpay_payment_id}`;
-      const expectedSignature = crypto
-        .createHmac('sha256', razorpayWebhookSecret)
-        .update(bodyString)
-        .digest('hex');
+    const bodyString = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const expectedSignature = crypto
+      .createHmac('sha256', razorpayWebhookSecret)
+      .update(bodyString)
+      .digest('hex');
 
       isSignatureValid = expectedSignature === razorpay_signature;
       console.log('Signature verification:', {
@@ -106,10 +106,10 @@ export async function POST(request: NextRequest) {
         const fileDoc = await adminDb.collection('files').doc(fileId).get();
         if (!fileDoc.exists) {
           console.error('File not found:', fileId);
-          return NextResponse.json(
+      return NextResponse.json(
             { success: false, message: 'File not found' },
-            { status: 404 }
-          );
+        { status: 404 }
+      );
         }
         
         const fileData = fileDoc.data();
@@ -211,6 +211,12 @@ export async function POST(request: NextRequest) {
       message: 'Payment verified and captured successfully',
       payment_id: razorpay_payment_id,
       file_id: fileId
+    }, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      }
     });
 
   } catch (error: any) {
@@ -446,6 +452,7 @@ export async function GET(request: NextRequest) {
           <style>
             body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
             .success { color: #27ae60; }
+            .loading { color: #3498db; }
           </style>
         </head>
         <body>
@@ -453,19 +460,69 @@ export async function GET(request: NextRequest) {
           <p>Your payment has been processed successfully.</p>
           <p>Payment ID: ${razorpay_payment_id}</p>
           <p>File ID: ${fileId || 'N/A'}</p>
+          <p class="loading">Closing payment window...</p>
           <script>
-            // For mobile apps, notify parent window of success
-            if (window.opener) {
-              window.opener.postMessage({type: 'payment_success', fileId: '${fileId || ''}', paymentId: '${razorpay_payment_id}'}, '*');
-              window.close();
-            } else if (window.parent !== window) {
-              window.parent.postMessage({type: 'payment_success', fileId: '${fileId || ''}', paymentId: '${razorpay_payment_id}'}, '*');
+            console.log('Payment success page loaded');
+            
+            // Multiple attempts to communicate with parent window
+            function notifyParent() {
+              const message = {
+                type: 'payment_success',
+                fileId: '${fileId || ''}',
+                paymentId: '${razorpay_payment_id}',
+                timestamp: new Date().toISOString()
+              };
+              
+              console.log('Sending success message:', message);
+              
+              // Try multiple methods to communicate
+              if (window.opener) {
+                console.log('Using window.opener');
+                window.opener.postMessage(message, '*');
+                window.opener.focus();
+              }
+              
+              if (window.parent !== window) {
+                console.log('Using window.parent');
+                window.parent.postMessage(message, '*');
+              }
+              
+              // Try to access parent from different contexts
+              try {
+                if (window.top !== window) {
+                  console.log('Using window.top');
+                  window.top.postMessage(message, '*');
+                }
+              } catch (e) {
+                console.log('Cannot access window.top:', e);
+              }
+              
+              // Try to close the window
+              setTimeout(() => {
+                try {
+                  window.close();
+                } catch (e) {
+                  console.log('Cannot close window:', e);
+                }
+              }, 1000);
             }
             
-            // Auto-close after 3 seconds
+            // Immediate notification
+            notifyParent();
+            
+            // Retry notification after a short delay
+            setTimeout(notifyParent, 500);
+            setTimeout(notifyParent, 1000);
+            setTimeout(notifyParent, 2000);
+            
+            // Auto-close after 5 seconds
             setTimeout(() => {
-              if (window.opener) window.close();
-            }, 3000);
+              try {
+                window.close();
+              } catch (e) {
+                console.log('Final close attempt failed:', e);
+              }
+            }, 5000);
           </script>
         </body>
         </html>
@@ -540,4 +597,15 @@ export async function GET(request: NextRequest) {
       headers: { 'Content-Type': 'text/html' }
     });
   }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    }
+  });
 }

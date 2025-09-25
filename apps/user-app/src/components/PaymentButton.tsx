@@ -82,13 +82,30 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
     const handleMessage = (event: MessageEvent) => {
       if (process.env.NODE_ENV === 'development') {
         console.log("Received message:", event.data);
+        console.log("Message origin:", event.origin);
+        console.log("Message source:", event.source);
       }
       
+      // Handle payment success
       if (event.data?.type === 'payment_success') {
         if (process.env.NODE_ENV === 'development') {
-          console.log("Payment success message received from mobile app");
+          console.log("Payment success message received from mobile app:", event.data);
+        }
+        
+        // Show success message to user
+        if (process.env.NODE_ENV === 'development') {
+          console.log("Calling onSuccess callback");
         }
         onSuccess?.();
+        
+        // Also try to refresh the page or update UI
+        setTimeout(() => {
+          if (process.env.NODE_ENV === 'development') {
+            console.log("Payment completed successfully, refreshing page...");
+          }
+          window.location.reload();
+        }, 1000);
+        
       } else if (event.data?.type === 'payment_error') {
         if (process.env.NODE_ENV === 'development') {
           console.log("Payment error message received from mobile app:", event.data.message);
@@ -97,8 +114,31 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       }
     };
 
+    // Add multiple event listeners for better compatibility
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    
+    // Also listen for custom events
+    const handleCustomEvent = (event: CustomEvent) => {
+      if (process.env.NODE_ENV === 'development') {
+        console.log("Received custom event:", event.detail);
+      }
+      
+      if (event.detail?.type === 'payment_success') {
+        onSuccess?.();
+        setTimeout(() => window.location.reload(), 1000);
+      } else if (event.detail?.type === 'payment_error') {
+        onError?.(event.detail.message || "Payment failed. Please try again.");
+      }
+    };
+    
+    document.addEventListener('payment_success', handleCustomEvent as EventListener);
+    document.addEventListener('payment_error', handleCustomEvent as EventListener);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      document.removeEventListener('payment_success', handleCustomEvent as EventListener);
+      document.removeEventListener('payment_error', handleCustomEvent as EventListener);
+    };
   }, [onSuccess, onError]);
 
   const handlePayment = async () => {
@@ -316,8 +356,8 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
         
         // For appxyz platform, use a special callback URL that works with mobile apps
         if (isAppxyz) {
-          // Use a universal callback URL that works for both web and mobile
-          options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
+          // Use a simpler success endpoint for mobile apps
+          options.callback_url = `${siteOrigin}/api/payment/success?${query}`;
         } else {
           // For regular WebViews, use the standard callback
           options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
