@@ -123,13 +123,26 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
       const useRedirectFlow = isAndroid && isWebView;
 
+      // First, create an order on the server so we have a payment record to verify against
+      const orderRes = await fetch('/api/payment/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId, userId: user.userId, amount })
+      });
+      if (!orderRes.ok) {
+        const errText = await orderRes.text();
+        throw new Error(`Failed to create order: ${orderRes.status} ${errText}`);
+      }
+      const orderData = await orderRes.json();
+
       // Open Razorpay with appropriate flow
       const options: any = {
         key: "rzp_test_RJTmoYCxPGvgYd",
-        amount: amount * 100, // Convert to paise
+        amount: orderData.amount, // already in paise from API
           currency: "INR",
           name: "DocUpload",
           description: `Payment for file processing - ${fileId || "Document"}`,
+        order_id: orderData.order_id,
         handler: async (response: any) => {
           if (process.env.NODE_ENV === 'development') {
             console.log("=== PAYMENT HANDLER CALLED ===");
@@ -154,8 +167,8 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
             console.log("Amount:", amount);
           }
           
-          // Generate a fallback order ID if not provided by Razorpay
-          const orderId = response.razorpay_order_id || `order_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+          // Use the order_id we created; Razorpay returns the same
+          const orderId = response.razorpay_order_id || orderData.order_id;
           
           try {
             // Always create a new payment record with Razorpay details
