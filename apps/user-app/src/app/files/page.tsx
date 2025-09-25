@@ -498,22 +498,22 @@ export default function FilesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <div className="max-w-4xl mx-auto">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-3xl font-bold text-gray-900">My Files</h1>
+          <div className="flex flex-wrap gap-3 justify-between items-center mb-4 sm:mb-6">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">My Files</h1>
             <Link
               href="/upload"
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              className="bg-blue-600 text-white px-3 py-2 sm:px-4 rounded-lg hover:bg-blue-700 transition-colors"
             >
               Upload New File
             </Link>
           </div>
 
           {/* Filter Tabs */}
-          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+          <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 mb-4 sm:mb-6">
             <div className="flex justify-between items-center">
-              <div className="flex space-x-1">
+              <div className="flex space-x-1 overflow-x-auto no-scrollbar [-ms-overflow-style:none] [scrollbar-width:none]">
                 {[
                   { key: "all", label: "All Files" },
                   { key: "pending_payment", label: "Pending Payment" },
@@ -524,7 +524,7 @@ export default function FilesPage() {
                   <button
                     key={tab.key}
                     onClick={() => setFilter(tab.key as any)}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`px-3 sm:px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
                       filter === tab.key
                         ? "bg-blue-100 text-blue-700"
                         : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -567,17 +567,17 @@ export default function FilesPage() {
               </div>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {filteredFiles.map((file) => (
                 <div key={file.id} className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-                  <div className="p-6">
+                  <div className="p-4 sm:p-6">
                     {/* File Header */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center space-x-4 flex-1">
+                    <div className="flex items-start justify-between mb-3 sm:mb-4">
+                      <div className="flex items-center space-x-3 sm:space-x-4 flex-1 min-w-0">
                         {getFileIcon(file.type)}
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-lg font-semibold text-gray-900 truncate">{file.name}</h3>
-                          <div className="flex items-center space-x-4 mt-1">
+                          <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">{file.name}</h3>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
                             <p className="text-sm text-gray-500">
                               {formatFileSize(file.size)}
                             </p>
@@ -603,10 +603,10 @@ export default function FilesPage() {
                         </div>
                       </div>
                       
-                      <div className="flex items-center space-x-3 ml-4">
+                      <div className="flex items-center space-x-3 ml-2 sm:ml-4 shrink-0">
                         {getStatusBadge(file.status)}
                         <div className="text-right">
-                          <span className="text-lg font-semibold text-gray-900">
+                          <span className="text-base sm:text-lg font-semibold text-gray-900">
                             ₹{file.paymentAmount}
                           </span>
                         </div>
@@ -614,7 +614,7 @@ export default function FilesPage() {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-gray-100">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 sm:pt-4 border-t border-gray-100">
                       <div className="flex flex-wrap items-center gap-2">
                         {(file.status === "pending_payment") && (
                           <>
@@ -636,7 +636,7 @@ export default function FilesPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/files/view/${file.id}`}
-                          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                          className="inline-flex items-center px-3 sm:px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -648,7 +648,7 @@ export default function FilesPage() {
                         {file.status === "completed" && file.completedFile && (
                           <button 
                             onClick={() => downloadCompletedFile(file.completedFile!.id, file.completedFile!.originalName)}
-                            className="inline-flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                            className="inline-flex items-center px-3 sm:px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
                           >
                             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -659,7 +659,7 @@ export default function FilesPage() {
                         
                         <button 
                           onClick={() => handleDeleteFile(file.id)}
-                          className="inline-flex items-center px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+                          className="inline-flex items-center px-3 sm:px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
