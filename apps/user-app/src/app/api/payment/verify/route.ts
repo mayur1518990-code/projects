@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
       if (isFormPost) {
-        return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+        return NextResponse.redirect(new URL('/files?payment=failed', url.origin), 303);
       }
       return err;
     }
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     if (!isSignatureValid) {
       if (isFormPost) {
-        return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+        return NextResponse.redirect(new URL('/files?payment=failed', url.origin), 303);
       }
       return NextResponse.json(
         { success: false, message: 'Invalid payment signature' },
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     if (paymentsSnapshot.empty) {
       if (isFormPost) {
-        return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+        return NextResponse.redirect(new URL('/files?payment=failed', url.origin), 303);
       }
       return NextResponse.json(
         { success: false, message: 'Payment record not found' },
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (isFormPost) {
-      return NextResponse.redirect(new URL('/files?payment=success', url.origin));
+      return NextResponse.redirect(new URL('/files?payment=success', url.origin), 303);
     }
 
     return NextResponse.json({
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     try {
       const url = new URL(request.url);
-      return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+      return NextResponse.redirect(new URL('/files?payment=failed', url.origin), 303);
     } catch {
       return NextResponse.json(
         { success: false, message: 'An error occurred while verifying payment' },
