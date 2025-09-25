@@ -4,33 +4,58 @@ import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      razorpay_order_id, 
-      razorpay_payment_id, 
-      razorpay_signature,
-      fileId,
-      userId 
-    } = body;
+    const contentType = request.headers.get('content-type') || '';
+    const url = new URL(request.url);
+    const isFormPost = contentType.includes('application/x-www-form-urlencoded');
+
+    let razorpay_order_id: string | null = null;
+    let razorpay_payment_id: string | null = null;
+    let razorpay_signature: string | null = null;
+    let fileId: string | null = null;
+    let userId: string | null = null;
+
+    if (isFormPost) {
+      const form = await request.formData();
+      razorpay_order_id = (form.get('razorpay_order_id') as string) || null;
+      razorpay_payment_id = (form.get('razorpay_payment_id') as string) || null;
+      razorpay_signature = (form.get('razorpay_signature') as string) || null;
+      // fileId and userId provided via callback_url query
+      fileId = url.searchParams.get('fileId');
+      userId = url.searchParams.get('userId');
+    } else {
+      const body = await request.json();
+      razorpay_order_id = body.razorpay_order_id;
+      razorpay_payment_id = body.razorpay_payment_id;
+      razorpay_signature = body.razorpay_signature;
+      fileId = body.fileId;
+      userId = body.userId;
+    }
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !fileId || !userId) {
-      return NextResponse.json(
+      const err = NextResponse.json(
         { success: false, message: 'Missing required payment verification data' },
         { status: 400 }
       );
+      if (isFormPost) {
+        return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+      }
+      return err;
     }
 
-    // Verify the signature (in production, use your actual webhook secret)
-    const razorpayWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'your_webhook_secret';
+    // Verify the signature using KEY SECRET per Razorpay docs
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
     const bodyString = `${razorpay_order_id}|${razorpay_payment_id}`;
     const expectedSignature = crypto
-      .createHmac('sha256', razorpayWebhookSecret)
+      .createHmac('sha256', keySecret)
       .update(bodyString)
       .digest('hex');
 
     const isSignatureValid = expectedSignature === razorpay_signature;
 
     if (!isSignatureValid) {
+      if (isFormPost) {
+        return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+      }
       return NextResponse.json(
         { success: false, message: 'Invalid payment signature' },
         { status: 400 }
@@ -47,6 +72,9 @@ export async function POST(request: NextRequest) {
       .get();
 
     if (paymentsSnapshot.empty) {
+      if (isFormPost) {
+        return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+      }
       return NextResponse.json(
         { success: false, message: 'Payment record not found' },
         { status: 404 }
@@ -54,9 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     const paymentDoc = paymentsSnapshot.docs[0];
-    const paymentData = paymentDoc.data();
 
-    // Update payment status to captured
     await paymentDoc.ref.update({
       status: 'captured',
       razorpayPaymentId: razorpay_payment_id,
@@ -64,12 +90,14 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date().toISOString(),
     });
 
-    // Update file status to paid
     await adminDb.collection('files').doc(fileId).update({
       status: 'paid',
       updatedAt: new Date().toISOString(),
     });
 
+    if (isFormPost) {
+      return NextResponse.redirect(new URL('/files?payment=success', url.origin));
+    }
 
     return NextResponse.json({
       success: true,
@@ -79,10 +107,15 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, message: 'An error occurred while verifying payment' },
-      { status: 500 }
-    );
+    try {
+      const url = new URL(request.url);
+      return NextResponse.redirect(new URL('/files?payment=failed', url.origin));
+    } catch {
+      return NextResponse.json(
+        { success: false, message: 'An error occurred while verifying payment' },
+        { status: 500 }
+      );
+    }
   }
 }
 

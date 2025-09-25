@@ -254,7 +254,7 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           amount: String(amount)
         }).toString();
         options.redirect = true;
-        options.callback_url = `/api/payment/create-payment?${query}`;
+        options.callback_url = `https://projects-user-app-rnhd.vercel.app/api/payment/verify?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {
