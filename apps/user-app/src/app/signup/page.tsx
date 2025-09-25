@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
@@ -17,38 +17,6 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
-
-  // Handle redirect-based Google sign-up result
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (!result) return;
-        const user = result.user;
-
-        const userDoc = await getDoc(doc(db, 'user', user.uid));
-        if (!userDoc.exists()) {
-          const userData = {
-            userId: user.uid,
-            name: user.displayName || user.email?.split('@')[0] || 'User',
-            email: user.email || '',
-            phone: user.phoneNumber || '',
-            createdAt: new Date().toISOString(),
-          };
-          await setDoc(doc(db, 'user', user.uid), userData);
-          localStorage.setItem('user', JSON.stringify(userData));
-        } else {
-          const userData = userDoc.data();
-          localStorage.setItem('user', JSON.stringify(userData));
-        }
-
-        localStorage.setItem('token', await user.getIdToken());
-        window.location.href = "/";
-      } catch (e) {
-        // ignore if no redirect result or handle errors silently
-      }
-    })();
-  }, []);
 
   const validateEmail = useCallback((email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -142,16 +110,6 @@ export default function SignupPage() {
       setError("");
       
       const provider = new GoogleAuthProvider();
-      // Detect Android WebView
-      const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
-      const isAndroid = /Android/i.test(ua);
-      const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
-
-      if (isAndroid && isWebView) {
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
@@ -183,11 +141,7 @@ export default function SignupPage() {
       // Redirect to home page
       window.location.href = "/";
     } catch (error: any) {
-      if (error?.code === 'auth/operation-not-supported-in-this-environment') {
-        setError('Sign-up not supported in this environment. Try using the system browser.');
-      } else {
-        setError('Google sign-up failed. Please try again.');
-      }
+      setError('Google sign-up failed. Please try again.');
     } finally {
       setIsLoading(false);
     }

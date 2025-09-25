@@ -123,19 +123,9 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
       const useRedirectFlow = isAndroid && isWebView;
 
-      // Ensure public key is available on the client
-      const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
-      if (!razorpayKey) {
-        if (process.env.NODE_ENV === 'development') {
-          console.error("Missing NEXT_PUBLIC_RAZORPAY_KEY_ID; cannot initialize Razorpay on client.");
-        }
-        onError?.("Payment unavailable: missing public payment key. Please contact support.");
-        return;
-      }
-
       // Open Razorpay with appropriate flow
       const options: any = {
-        key: razorpayKey,
+        key: "rzp_test_RJTmoYCxPGvgYd",
         amount: amount * 100, // Convert to paise
           currency: "INR",
           name: "DocUpload",
@@ -168,7 +158,7 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           const orderId = response.razorpay_order_id || `order_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
           
           try {
-            // Always create or upsert a payment record with Razorpay details
+            // Always create a new payment record with Razorpay details
             const createPaymentResponse = await fetch("/api/payment/create-payment", {
               method: "POST",
               headers: {
@@ -191,20 +181,25 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
 
             }
             
-            // If creation fails due to race with redirect verify, ignore error and continue
             if (!createPaymentResponse.ok) {
+              const errorText = await createPaymentResponse.text();
               if (process.env.NODE_ENV === 'development') {
-                console.warn('Create-payment API not OK, possibly handled by redirect verify. Continuing.');
+                console.error('Payment creation API error:', createPaymentResponse.status, errorText);
               }
+              throw new Error(`Payment creation failed: ${createPaymentResponse.status} - ${errorText}`);
             }
 
-            let createPaymentData: any = null;
-            try {
-              createPaymentData = await createPaymentResponse.json();
+            const createPaymentData = await createPaymentResponse.json();
+            if (process.env.NODE_ENV === 'development') {
+              console.log('Payment created with Razorpay details:', createPaymentData);
+            }
+            
+            if (!createPaymentData.success) {
               if (process.env.NODE_ENV === 'development') {
-                console.log('Payment created/updated:', createPaymentData);
+                console.error('Payment creation failed:', createPaymentData.message);
               }
-            } catch {}
+              throw new Error(`Payment creation failed: ${createPaymentData.message}`);
+            }
 
             // Update file status to paid
             const fileUpdateResponse = await fetch("/api/files", {
@@ -259,7 +254,7 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           amount: String(amount)
         }).toString();
         options.redirect = true;
-        options.callback_url = `/api/payment/verify?${query}`;
+        options.callback_url = `/api/payment/callback?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {

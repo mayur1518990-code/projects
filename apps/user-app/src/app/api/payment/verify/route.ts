@@ -20,17 +20,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the signature using Razorpay key secret (not webhook secret)
-    const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!razorpayKeySecret) {
-      return NextResponse.json(
-        { success: false, message: 'Server misconfigured: missing RAZORPAY_KEY_SECRET' },
-        { status: 500 }
-      );
-    }
+    // Verify the signature (in production, use your actual webhook secret)
+    const razorpayWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'your_webhook_secret';
     const bodyString = `${razorpay_order_id}|${razorpay_payment_id}`;
     const expectedSignature = crypto
-      .createHmac('sha256', razorpayKeySecret)
+      .createHmac('sha256', razorpayWebhookSecret)
       .update(bodyString)
       .digest('hex');
 
@@ -52,31 +46,15 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .get();
 
-    let paymentDoc = paymentsSnapshot.docs[0];
-    if (!paymentDoc) {
-      // In redirect/WebView flow, the client handler may not have run yet.
-      // Create a minimal payment record now so we can mark it captured.
-      const newPaymentRef = adminDb.collection('payments').doc();
-      const paymentDocument = {
-        id: newPaymentRef.id,
-        fileId,
-        userId,
-        amount: null,
-        currency: 'INR',
-        status: 'created',
-        razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
-        razorpaySignature: razorpay_signature,
-        paymentMethod: 'razorpay',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        metadata: {
-          source: 'verify-fallback'
-        }
-      };
-      await newPaymentRef.set(paymentDocument);
-      paymentDoc = await newPaymentRef.get();
+    if (paymentsSnapshot.empty) {
+      return NextResponse.json(
+        { success: false, message: 'Payment record not found' },
+        { status: 404 }
+      );
     }
+
+    const paymentDoc = paymentsSnapshot.docs[0];
+    const paymentData = paymentDoc.data();
 
     // Update payment status to captured
     await paymentDoc.ref.update({
