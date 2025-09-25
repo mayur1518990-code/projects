@@ -19,7 +19,9 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 
 // Initialize Firebase Admin
-const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/^"|"$/g, '') || '';
+const privateKey = (process.env.FIREBASE_PRIVATE_KEY || '')
+  .replace(/^"|"$/g, '')
+  .replace(/\\n/g, '\n');
 const firebaseAdminConfig = {
   credential: cert({
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
