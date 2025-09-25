@@ -163,8 +163,28 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
                '';
       })();
 
+      // Debug: Check if Razorpay key is available
+      const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_RJTmoYCxPGvgYd";
+      if (process.env.NODE_ENV === 'development') {
+        console.log("Environment variables check:");
+        console.log("- NODE_ENV:", process.env.NODE_ENV);
+        console.log("- NEXT_PUBLIC_RAZORPAY_KEY_ID:", process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID);
+        console.log("- Razorpay Key:", razorpayKey ? "Found" : "Missing");
+        console.log("- Key value:", razorpayKey);
+        console.log("- Using fallback key:", razorpayKey === "rzp_test_RJTmoYCxPGvgYd");
+      }
+      
+      if (!razorpayKey) {
+        const errorMsg = "Razorpay key not found. Please check NEXT_PUBLIC_RAZORPAY_KEY_ID environment variable.";
+        if (process.env.NODE_ENV === 'development') {
+          console.error(errorMsg);
+          console.error("Available env vars:", Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC')));
+        }
+        throw new Error(errorMsg);
+      }
+
       const options: any = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+        key: razorpayKey,
         amount: amount * 100, // Convert to paise
           currency: "INR",
           name: "DocUpload",
