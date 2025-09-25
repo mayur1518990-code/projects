@@ -123,9 +123,19 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const isWebView = /(wv|WebView|; wv\))/i.test(ua) || (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
       const useRedirectFlow = isAndroid && isWebView;
 
+      // Ensure public key is available on the client
+      const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+      if (!razorpayKey) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error("Missing NEXT_PUBLIC_RAZORPAY_KEY_ID; cannot initialize Razorpay on client.");
+        }
+        onError?.("Payment unavailable: missing public payment key. Please contact support.");
+        return;
+      }
+
       // Open Razorpay with appropriate flow
       const options: any = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "",
+        key: razorpayKey,
         amount: amount * 100, // Convert to paise
           currency: "INR",
           name: "DocUpload",
