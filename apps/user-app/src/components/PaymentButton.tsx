@@ -253,17 +253,26 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           },
         };
 
-      // Always set callback_url as absolute URL for consistency
-      const query = new URLSearchParams({
-        fileId: fileId || '',
-        userId: user.userId,
-        amount: String(amount)
-      }).toString();
-      options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
-
       if (useRedirectFlow) {
         // In WebViews, use redirect to Razorpay-hosted page and back to our callback
+        // Razorpay will append its own parameters (razorpay_order_id, razorpay_payment_id, razorpay_signature)
+        // to our callback URL, so we include our custom parameters as well
+        const query = new URLSearchParams({
+          fileId: fileId || '',
+          userId: user.userId,
+          amount: String(amount)
+        }).toString();
         options.redirect = true;
+        options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
+      } else {
+        // For regular popup flow, we don't need callback_url as the handler function processes the payment
+        // But we can still set it for consistency if needed
+        const query = new URLSearchParams({
+          fileId: fileId || '',
+          userId: user.userId,
+          amount: String(amount)
+        }).toString();
+        options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {
