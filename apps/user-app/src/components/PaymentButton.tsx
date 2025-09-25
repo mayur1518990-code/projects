@@ -20,8 +20,6 @@ interface RazorpayOptions {
   description: string;
   order_id: string;
   handler: (response: any) => void;
-  callback_url?: string;
-  redirect?: boolean;
   prefill?: {
     name?: string;
     email?: string;
@@ -129,7 +127,7 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
       const siteOrigin =
         (typeof window !== 'undefined' && window.location?.origin) ||
         process.env.NEXT_PUBLIC_SITE_URL ||
-        'https://projects-user-app.vercel.app';
+        '';
 
       const options: any = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
@@ -253,17 +251,16 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           },
         };
 
-      // Always set callback_url as absolute URL for consistency
-      const query = new URLSearchParams({
-        fileId: fileId || '',
-        userId: user.userId,
-        amount: String(amount)
-      }).toString();
-      options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
-
       if (useRedirectFlow) {
         // In WebViews, use redirect to Razorpay-hosted page and back to our callback
+        const query = new URLSearchParams({
+          fileId: fileId || '',
+          userId: user.userId,
+          amount: String(amount)
+        }).toString();
         options.redirect = true;
+        // Use absolute URL to our verify endpoint (supports GET)
+        options.callback_url = `${siteOrigin}/api/payment/verify?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {
