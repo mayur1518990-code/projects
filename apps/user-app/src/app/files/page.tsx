@@ -320,6 +320,8 @@ export default function FilesPage() {
     loadFiles(true); // Force refresh
   }, [loadFiles]);
 
+  
+
   // Pull-to-refresh state
   const [pullDistance, setPullDistance] = useState(0);
   const isPullingRef = useRef(false);
