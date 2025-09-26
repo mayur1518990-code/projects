@@ -16,7 +16,7 @@ export const authOptions: AuthOptions = {
           // Check if user exists in Firestore
           const userDoc = await adminDb.collection('user').doc(user.id).get();
           
-          if (!userDoc.exists()) {
+          if (!userDoc.exists) {
             // Create new user in Firestore
             const userData = {
               userId: user.id,
