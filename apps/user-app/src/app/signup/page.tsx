@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
@@ -17,6 +17,51 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
+
+  // Handle redirect result for mobile WebViews
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          const user = result.user;
+          
+          // Check if user already exists in Firestore
+          const userDoc = await getDoc(doc(db, 'user', user.uid));
+          
+          if (!userDoc.exists()) {
+            // Create new user in Firestore
+            const userData = {
+              userId: user.uid,
+              name: user.displayName || user.email?.split('@')[0] || 'User',
+              email: user.email || '',
+              phone: user.phoneNumber || '',
+              createdAt: new Date().toISOString(),
+            };
+            
+            await setDoc(doc(db, 'user', user.uid), userData);
+            
+            // Store user data in localStorage
+            localStorage.setItem('user', JSON.stringify(userData));
+          } else {
+            // User exists, get their data
+            const userData = userDoc.data();
+            localStorage.setItem('user', JSON.stringify(userData));
+          }
+          
+          localStorage.setItem('token', await user.getIdToken());
+          
+          // Redirect to home page
+          window.location.href = "/";
+        }
+      } catch (error: any) {
+        console.error('Redirect result error:', error);
+        setError('Google sign-up failed. Please try again.');
+      }
+    };
+
+    handleRedirectResult();
+  }, []);
 
   const validateEmail = useCallback((email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -110,7 +155,29 @@ export default function SignupPage() {
       setError("");
       
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
+      
+      // Detect if we're in a mobile WebView
+      const ua = navigator.userAgent || '';
+      const isMobileWebView = /(wv|WebView|; wv\))/i.test(ua) || 
+        (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
+      
+      let result;
+      
+      if (isMobileWebView) {
+        // Use redirect for mobile WebViews
+        provider.setCustomParameters({
+          prompt: 'select_account',
+          redirect_uri: window.location.origin + '/login'
+        });
+        
+        // For WebViews, we need to use redirect instead of popup
+        await signInWithRedirect(auth, provider);
+        return; // The redirect will handle the rest
+      } else {
+        // Use popup for regular browsers
+        result = await signInWithPopup(auth, provider);
+      }
+      
       const user = result.user;
 
       // Check if user already exists in Firestore
@@ -141,7 +208,21 @@ export default function SignupPage() {
       // Redirect to home page
       window.location.href = "/";
     } catch (error: any) {
-      setError('Google sign-up failed. Please try again.');
+      let errorMessage = 'Google sign-up failed. Please try again.';
+      
+      if (error.code === 'auth/popup-closed-by-user') {
+        errorMessage = 'Sign-up was cancelled. Please try again.';
+      } else if (error.code === 'auth/popup-blocked') {
+        errorMessage = 'Popup was blocked. Please allow popups and try again.';
+      } else if (error.code === 'auth/unauthorized-domain') {
+        errorMessage = 'This domain is not authorized. Please contact support.';
+      } else if (error.code === 'auth/operation-not-allowed') {
+        errorMessage = 'Google sign-in is not enabled. Please contact support.';
+      } else if (error.code === 'auth/network-request-failed') {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

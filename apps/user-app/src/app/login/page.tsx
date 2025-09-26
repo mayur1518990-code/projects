@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
@@ -14,6 +14,51 @@ export default function LoginPage() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Handle redirect result for mobile WebViews
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          const user = result.user;
+          
+          // Check if user already exists in Firestore
+          const userDoc = await getDoc(doc(db, 'user', user.uid));
+          
+          if (!userDoc.exists()) {
+            // Create new user in Firestore
+            const userData = {
+              userId: user.uid,
+              name: user.displayName || user.email?.split('@')[0] || 'User',
+              email: user.email || '',
+              phone: user.phoneNumber || '',
+              createdAt: new Date().toISOString(),
+            };
+            
+            await setDoc(doc(db, 'user', user.uid), userData);
+            
+            // Store user data in localStorage
+            localStorage.setItem('user', JSON.stringify(userData));
+          } else {
+            // User exists, get their data
+            const userData = userDoc.data();
+            localStorage.setItem('user', JSON.stringify(userData));
+          }
+          
+          localStorage.setItem('token', await user.getIdToken());
+          
+          // Redirect to home page
+          window.location.href = "/";
+        }
+      } catch (error: any) {
+        console.error('Redirect result error:', error);
+        setError('Google sign-in failed. Please try again.');
+      }
+    };
+
+    handleRedirectResult();
+  }, []);
 
   const validateEmail = useCallback((email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -99,16 +144,34 @@ export default function LoginPage() {
       
       const provider = new GoogleAuthProvider();
       
-      // Add additional scopes if needed
-      provider.addScope('email');
-      provider.addScope('profile');
+      // Detect if we're in a mobile WebView
+      const ua = navigator.userAgent || '';
+      const isMobileWebView = /(wv|WebView|; wv\))/i.test(ua) || 
+        (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
       
-      // Set custom parameters to avoid popup issues
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
+      let result;
       
-      const result = await signInWithPopup(auth, provider);
+      if (isMobileWebView) {
+        // Use redirect for mobile WebViews
+        provider.setCustomParameters({
+          prompt: 'select_account',
+          redirect_uri: window.location.origin + '/login'
+        });
+        
+        // For WebViews, we need to use redirect instead of popup
+        await signInWithRedirect(auth, provider);
+        return; // The redirect will handle the rest
+      } else {
+        // Use popup for regular browsers
+        provider.addScope('email');
+        provider.addScope('profile');
+        provider.setCustomParameters({
+          prompt: 'select_account'
+        });
+        
+        result = await signInWithPopup(auth, provider);
+      }
+      
       const user = result.user;
       
       // Check if user already exists in Firestore
