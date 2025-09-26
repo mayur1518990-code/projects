@@ -7,6 +7,22 @@ import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRed
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
+// Extend Window interface for WebView message handlers
+declare global {
+  interface Window {
+    ReactNativeWebView?: {
+      postMessage: (message: string) => void;
+    };
+    webkit?: {
+      messageHandlers?: {
+        authSuccess?: {
+          postMessage: (data: any) => void;
+        };
+      };
+    };
+  }
+}
+
 export default function LoginPage() {
   const [formData, setFormData] = useState({
     email: "",
