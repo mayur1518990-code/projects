@@ -73,7 +73,7 @@ export default function SignupPage() {
               type: 'AUTH_SUCCESS',
               user: userData
             }));
-          } else if (window.webkit && window.webkit.messageHandlers) {
+          } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authSuccess) {
             // iOS WKWebView
             window.webkit.messageHandlers.authSuccess.postMessage({
               type: 'AUTH_SUCCESS',
