@@ -18,6 +18,9 @@ declare global {
         authSuccess?: {
           postMessage: (data: any) => void;
         };
+        googleAuth?: {
+          postMessage: (data: any) => void;
+        };
       };
     };
   }
