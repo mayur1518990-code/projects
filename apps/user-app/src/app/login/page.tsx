@@ -80,41 +80,75 @@ export default function LoginPage() {
           newUrl.search = '';
           window.history.replaceState({}, '', newUrl.toString());
           
-          // For mobile apps, try to close the WebView and return to app
+          // For mobile apps, send auth data and close WebView
+          const token = await user.getIdToken();
+          
           if (window.ReactNativeWebView) {
             // React Native WebView
-            console.log('Sending message to React Native WebView:', userData);
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'AUTH_SUCCESS',
-              user: userData,
-              token: await user.getIdToken()
-            }));
+            console.log('Sending auth data to React Native WebView:', userData);
             
-            // Also try to close the WebView
+            // Send comprehensive auth data
+            const authData = {
+              type: 'AUTH_SUCCESS',
+              success: true,
+              user: userData,
+              token: token,
+              userId: userData.userId,
+              userName: userData.name,
+              userEmail: userData.email,
+              timestamp: Date.now()
+            };
+            
+            window.ReactNativeWebView.postMessage(JSON.stringify(authData));
+            
+            // Also send individual messages for better compatibility
             setTimeout(() => {
-              if (window.ReactNativeWebView) {
-                window.ReactNativeWebView.postMessage(JSON.stringify({
-                  type: 'CLOSE_WEBVIEW'
-                }));
-              }
-            }, 1000);
+              window.ReactNativeWebView?.postMessage(JSON.stringify({
+                type: 'USER_AUTHENTICATED',
+                userId: userData.userId,
+                userName: userData.name,
+                userEmail: userData.email,
+                token: token
+              }));
+            }, 500);
+            
+            // Close WebView after sending data
+            setTimeout(() => {
+              window.ReactNativeWebView?.postMessage(JSON.stringify({
+                type: 'CLOSE_WEBVIEW',
+                reason: 'auth_complete'
+              }));
+            }, 1500);
+            
           } else if (window.webkit && window.webkit.messageHandlers) {
             // iOS WKWebView
-            console.log('Sending message to iOS WKWebView:', userData);
+            console.log('Sending auth data to iOS WKWebView:', userData);
+            
+            const authData = {
+              type: 'AUTH_SUCCESS',
+              success: true,
+              user: userData,
+              token: token,
+              userId: userData.userId,
+              userName: userData.name,
+              userEmail: userData.email,
+              timestamp: Date.now()
+            };
+            
             if (window.webkit.messageHandlers.authSuccess) {
-              window.webkit.messageHandlers.authSuccess.postMessage({
-                type: 'AUTH_SUCCESS',
-                user: userData,
-                token: await user.getIdToken()
-              });
+              window.webkit.messageHandlers.authSuccess.postMessage(authData);
             }
             
             // Also try to close the WebView
             setTimeout(() => {
-              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
-                window.webkit.messageHandlers.closeWebView.postMessage({});
+              if (window.webkit.messageHandlers.closeWebView) {
+                window.webkit.messageHandlers.closeWebView.postMessage({
+                  type: 'CLOSE_WEBVIEW',
+                  reason: 'auth_complete'
+                });
               }
-            }, 1000);
+            }, 1500);
+            
           } else {
             // Fallback: redirect to home page with auth success parameters
             console.log('No WebView detected, redirecting to home page with auth data');
@@ -123,6 +157,7 @@ export default function LoginPage() {
             authUrl.searchParams.set('user_id', userData.userId);
             authUrl.searchParams.set('user_name', userData.name);
             authUrl.searchParams.set('user_email', userData.email);
+            authUrl.searchParams.set('token', token);
             window.location.href = authUrl.toString();
           }
         } else {
