@@ -103,7 +103,33 @@ export default function LoginPage() {
       }
     };
 
+    // Listen for messages from native app
+    const handleNativeAuthResult = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'NATIVE_AUTH_RESULT') {
+          if (data.success) {
+            // Store user data from native app
+            localStorage.setItem('user', JSON.stringify(data.user));
+            localStorage.setItem('token', data.token);
+            
+            // Redirect to home page
+            window.location.href = "/";
+          } else {
+            setError(data.error || 'Authentication failed');
+          }
+        }
+      } catch (error) {
+        console.error('Error handling native auth result:', error);
+      }
+    };
+
+    window.addEventListener('message', handleNativeAuthResult);
     handleRedirectResult();
+
+    return () => {
+      window.removeEventListener('message', handleNativeAuthResult);
+    };
   }, []);
 
   const validateEmail = useCallback((email: string) => {
@@ -198,15 +224,42 @@ export default function LoginPage() {
       let result;
       
       if (isMobileWebView) {
-        // Use redirect for mobile WebViews with custom redirect URI
-        provider.setCustomParameters({
-          prompt: 'select_account',
-          redirect_uri: window.location.origin + '/login'
-        });
-        
-        // For WebViews, we need to use redirect instead of popup
-        await signInWithRedirect(auth, provider);
-        return; // The redirect will handle the rest
+        // For mobile WebViews, use a different approach
+        // Try to use the app's native auth if available
+        if (window.ReactNativeWebView) {
+          // Send message to native app to handle Google auth
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'GOOGLE_AUTH_REQUEST',
+            action: 'signin'
+          }));
+          return; // Let the native app handle it
+        } else if (window.webkit && window.webkit.messageHandlers) {
+          // Send message to iOS app to handle Google auth
+          window.webkit.messageHandlers.googleAuth?.postMessage({
+            type: 'GOOGLE_AUTH_REQUEST',
+            action: 'signin'
+          });
+          return; // Let the native app handle it
+        } else {
+          // Fallback: try popup first, then redirect
+          try {
+            result = await signInWithPopup(auth, provider);
+          } catch (popupError: any) {
+            if (popupError.code === 'auth/popup-closed-by-user' || 
+                popupError.code === 'auth/popup-blocked' ||
+                popupError.code === 'auth/cancelled-popup-request') {
+              // Popup failed, try redirect
+              provider.setCustomParameters({
+                prompt: 'select_account'
+              });
+              
+              await signInWithRedirect(auth, provider);
+              return; // The redirect will handle the rest
+            } else {
+              throw popupError;
+            }
+          }
+        }
       } else {
         // Use popup for regular browsers
         provider.addScope('email');
