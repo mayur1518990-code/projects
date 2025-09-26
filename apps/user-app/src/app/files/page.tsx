@@ -320,6 +320,86 @@ export default function FilesPage() {
     loadFiles(true); // Force refresh
   }, [loadFiles]);
 
+  // Pull-to-refresh state
+  const [pullDistance, setPullDistance] = useState(0);
+  const isPullingRef = useRef(false);
+  const pullStartYRef = useRef<number | null>(null);
+  const PULL_THRESHOLD_PX = 64; // release threshold
+  const PULL_MAX_PX = 128; // visual limit
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (window.scrollY > 0) return; // only when scrolled to top
+    isPullingRef.current = true;
+    pullStartYRef.current = e.touches[0].clientY;
+    setPullDistance(0);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!isPullingRef.current || pullStartYRef.current == null) return;
+    const currentY = e.touches[0].clientY;
+    const delta = Math.max(0, currentY - pullStartYRef.current);
+    if (delta > 0) {
+      // prevent page scroll while pulling
+      e.preventDefault();
+      const eased = Math.min(PULL_MAX_PX, delta * 0.6); // add a bit of resistance
+      setPullDistance(eased);
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (!isPullingRef.current) return;
+    const shouldRefresh = pullDistance >= PULL_THRESHOLD_PX;
+    isPullingRef.current = false;
+    pullStartYRef.current = null;
+    setPullDistance(0);
+    if (shouldRefresh) {
+      tryAutoRefresh('pull-to-refresh');
+    }
+  }, [pullDistance, tryAutoRefresh]);
+
+  // Throttled auto-refresh trigger to avoid excessive requests
+  const lastAutoRefreshRef = useRef<number>(0);
+  const AUTO_REFRESH_COOLDOWN_MS = 8000; // 8s cooldown between auto refreshes
+
+  const tryAutoRefresh = useCallback((reason?: string) => {
+    const now = Date.now();
+    if (now - lastAutoRefreshRef.current < AUTO_REFRESH_COOLDOWN_MS) return;
+    lastAutoRefreshRef.current = now;
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Files] auto-refresh', reason || '');
+    }
+    loadFiles(true);
+  }, [loadFiles]);
+
+  // Refresh when window regains focus or tab becomes visible
+  useEffect(() => {
+    const onFocus = () => tryAutoRefresh('focus');
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') tryAutoRefresh('visibility');
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [tryAutoRefresh]);
+
+  // Refresh when user scrolls near bottom (acts like infinite check for updates)
+  useEffect(() => {
+    const threshold = 200; // px from bottom
+    const onScroll = () => {
+      const scrolledToBottom = window.innerHeight + window.scrollY >= (document.body.offsetHeight - threshold);
+      if (scrolledToBottom) {
+        tryAutoRefresh('scroll-bottom');
+      }
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [tryAutoRefresh]);
+
   const handleQRGenerate = (fileId: string) => {
     setFiles(prev =>
       prev.map(file =>
@@ -498,7 +578,30 @@ export default function FilesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
+      {/* Pull-to-refresh indicator area at top */}
+      <div
+        className="sticky top-0 z-10 flex items-center justify-center"
+        style={{ height: pullDistance ? Math.min(64, pullDistance) : 0 }}
+      >
+        {pullDistance > 0 && (
+          <div className="flex items-center space-x-2 text-blue-600 text-sm">
+            {pullDistance < 64 ? (
+              <svg className="w-4 h-4 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            ) : (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            )}
+            <span>{pullDistance < 64 ? 'Pull to refresh' : 'Release to refresh'}</span>
+          </div>
+        )}
+      </div>
+      <main
+        className="container mx-auto px-3 sm:px-4 py-4 sm:py-8"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         <div className="max-w-4xl mx-auto">
           <div className="flex flex-wrap gap-3 justify-between items-center mb-4 sm:mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">My Files</h1>
