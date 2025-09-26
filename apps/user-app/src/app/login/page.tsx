@@ -21,6 +21,9 @@ declare global {
         googleAuth?: {
           postMessage: (data: any) => void;
         };
+        closeWebView?: {
+          postMessage: (data: any) => void;
+        };
       };
     };
   }
