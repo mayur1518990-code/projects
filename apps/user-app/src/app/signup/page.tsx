@@ -210,23 +210,15 @@ export default function SignupPage() {
       let result;
       
       if (isMobileWebView) {
-        // For mobile WebViews, try popup first, fallback to redirect
-        try {
-          result = await signInWithPopup(auth, provider);
-        } catch (popupError: any) {
-          if (popupError.code === 'auth/popup-closed-by-user' || 
-              popupError.code === 'auth/popup-blocked' ||
-              popupError.code === 'auth/cancelled-popup-request') {
-            // Popup failed, try redirect
-            provider.setCustomParameters({
-              prompt: 'select_account'
-            });
-            await signInWithRedirect(auth, provider);
-            return; // The redirect will handle the rest
-          } else {
-            throw popupError;
-          }
-        }
+        // Use redirect for mobile WebViews with custom redirect URI
+        provider.setCustomParameters({
+          prompt: 'select_account',
+          redirect_uri: window.location.origin + '/signup'
+        });
+        
+        // For WebViews, we need to use redirect instead of popup
+        await signInWithRedirect(auth, provider);
+        return; // The redirect will handle the rest
       } else {
         // Use popup for regular browsers
         result = await signInWithPopup(auth, provider);
