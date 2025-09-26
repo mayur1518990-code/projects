@@ -83,6 +83,22 @@ export default function SignupPage() {
             // Fallback: redirect to home page
             window.location.href = "/";
           }
+        } else {
+          // Check if we're in a mobile WebView and no redirect result
+          const ua = navigator.userAgent || '';
+          const isMobileWebView = /(wv|WebView|; wv\))/i.test(ua) || 
+            (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
+          
+          if (isMobileWebView) {
+            // If we're in a WebView and no redirect result, we might be stuck in a loop
+            // Try to detect if we just came back from Google auth
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('state') || urlParams.get('code')) {
+              // We have auth parameters, but getRedirectResult didn't work
+              // This might be a WebView issue, so redirect to home
+              window.location.href = "/";
+            }
+          }
         }
       } catch (error: any) {
         console.error('Redirect result error:', error);
