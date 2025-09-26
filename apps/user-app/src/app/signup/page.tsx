@@ -109,34 +109,15 @@ export default function SignupPage() {
       setIsLoading(true);
       setError("");
       
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-
-      // Check if user already exists in Firestore
-      const userDoc = await getDoc(doc(db, 'user', user.uid));
+      // Use NextAuth.js instead of Firebase Auth for WebView compatibility
+      const result = await signIn('google', { 
+        callbackUrl: '/',
+        redirect: false 
+      });
       
-      if (!userDoc.exists()) {
-        // Create new user in Firestore
-        const userData = {
-          userId: user.uid,
-          name: user.displayName || user.email?.split('@')[0] || 'User',
-          email: user.email || '',
-          phone: user.phoneNumber || '',
-          createdAt: new Date().toISOString(),
-        };
-        
-        await setDoc(doc(db, 'user', user.uid), userData);
-        
-        // Store user data in localStorage
-        localStorage.setItem('user', JSON.stringify(userData));
-      } else {
-        // User exists, get their data
-        const userData = userDoc.data();
-        localStorage.setItem('user', JSON.stringify(userData));
+      if (result?.error) {
+        throw new Error(result.error);
       }
-      
-      localStorage.setItem('token', await user.getIdToken());
       
       // Redirect to home page
       window.location.href = "/";
