@@ -153,7 +153,7 @@ export default function ViewDocumentPage() {
           <img 
             src={fileContent} 
             alt={file.originalName}
-            className="max-w-full max-h-96 object-contain rounded-lg shadow-lg"
+            className="max-w-full max-h-64 sm:max-h-80 md:max-h-96 object-contain rounded-lg shadow-lg"
           />
         </div>
       );
@@ -161,7 +161,7 @@ export default function ViewDocumentPage() {
 
     if (file.mimeType === "application/pdf") {
       return (
-        <div className="w-full h-96">
+        <div className="w-full h-64 sm:h-80 md:h-96">
           <iframe
             src={fileContent}
             className="w-full h-full border-0 rounded-lg shadow-lg"
@@ -173,8 +173,8 @@ export default function ViewDocumentPage() {
 
     if (file.mimeType.includes("text")) {
       return (
-        <div className="bg-gray-50 p-6 rounded-lg">
-          <pre className="whitespace-pre-wrap text-sm font-mono">
+        <div className="bg-gray-50 p-3 sm:p-4 md:p-6 rounded-lg">
+          <pre className="whitespace-pre-wrap text-xs sm:text-sm font-mono overflow-x-auto">
             {fileContent}
           </pre>
         </div>
@@ -182,17 +182,17 @@ export default function ViewDocumentPage() {
     }
 
     return (
-      <div className="text-center py-8">
-        <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+      <div className="text-center py-6 sm:py-8">
+        <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 bg-gray-100 rounded-full flex items-center justify-center">
           {getFileIcon(file.mimeType)}
         </div>
-        <p className="text-gray-500 mb-4">
+        <p className="text-sm sm:text-base text-gray-500 mb-3 sm:mb-4">
           Preview not available for this file type
         </p>
         <a 
           href={fileContent} 
           download={file.originalName}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+          className="bg-blue-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
         >
           Download File
         </a>
@@ -283,39 +283,41 @@ export default function ViewDocumentPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4 py-3 sm:py-4">
+            <div className="flex items-center space-x-3 sm:space-x-4 min-w-0 flex-1">
               <button 
                 onClick={() => router.back()}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-500 hover:text-gray-700 flex-shrink-0"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <div className="flex items-center space-x-3">
-                {getFileIcon(file.mimeType)}
-                <div>
-                  <h1 className="text-lg font-semibold text-gray-900">{file.originalName}</h1>
-                  <p className="text-sm text-gray-500">
+              <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
+                <div className="flex-shrink-0">
+                  {getFileIcon(file.mimeType)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-sm sm:text-lg font-semibold text-gray-900 truncate">{file.originalName}</h1>
+                  <p className="text-xs sm:text-sm text-gray-500">
                     {formatFileSize(file.size)} • {new Date(file.uploadedAt).toLocaleDateString()}
                   </p>
                 </div>
               </div>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
               <Link
                 href="/files"
-                className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
+                className="text-gray-500 hover:text-gray-700 px-2 sm:px-3 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium"
               >
                 My Files
               </Link>
               <a 
                 href={fileContent || '#'} 
                 download={file.originalName}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                className="bg-blue-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 Download
               </a>
@@ -325,8 +327,8 @@ export default function ViewDocumentPage() {
       </div>
 
       {/* Document Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-lg shadow-sm p-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 md:py-8">
+        <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 md:p-6">
           {renderFileContent()}
         </div>
       </main>

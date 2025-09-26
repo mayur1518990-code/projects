@@ -19,14 +19,14 @@ export const Navbar = memo(function Navbar() {
 
   return (
     <nav className="bg-white/95 backdrop-blur sticky top-0 z-50 shadow-sm border-b">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-14 sm:h-16">
-          <div className="flex items-center min-w-0">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+        <div className="flex justify-between items-center h-12 sm:h-14 md:h-16">
+          <div className="flex items-center min-w-0 flex-1">
             <Link href="/" className="flex-shrink-0">
-              <span className="text-xl sm:text-2xl font-bold text-blue-600">DocUpload</span>
+              <span className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600">DocUpload</span>
             </Link>
             
-            <div className="hidden md:ml-6 md:flex md:space-x-8">
+            <div className="hidden md:ml-6 md:flex md:space-x-6 lg:space-x-8">
               <Link
                 href="/upload"
                 className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
@@ -53,30 +53,30 @@ export const Navbar = memo(function Navbar() {
 
           <div className="flex items-center shrink-0">
             {loading ? (
-              <div className="text-gray-500">Loading...</div>
+              <div className="text-xs sm:text-sm text-gray-500">Loading...</div>
             ) : user ? (
-              <div className="flex items-center space-x-2 sm:space-x-4">
-                <span className="hidden xs:inline text-sm text-gray-700 truncate max-w-[30vw] sm:max-w-none">
+              <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4">
+                <span className="hidden sm:inline text-xs sm:text-sm text-gray-700 truncate max-w-[20vw] md:max-w-none">
                   Welcome, {user.name || user.email}
                 </span>
                 <button
                   onClick={signOut}
-                  className="bg-red-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                  className="bg-red-600 text-white px-2 sm:px-3 md:px-4 py-1 sm:py-1.5 md:py-2 rounded-md text-xs sm:text-sm font-medium hover:bg-red-700 transition-colors"
                 >
                   Sign Out
                 </button>
               </div>
             ) : (
-              <div className="flex items-center space-x-2 sm:space-x-4">
+              <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4">
                 <Link
                   href="/login"
-                  className="text-gray-500 hover:text-gray-700 px-2 py-1.5 sm:px-3 sm:py-2 rounded-md text-sm font-medium"
+                  className="text-gray-500 hover:text-gray-700 px-1 sm:px-2 md:px-3 py-1 sm:py-1.5 md:py-2 rounded-md text-xs sm:text-sm font-medium"
                 >
                   Login
                 </Link>
                 <Link
                   href="/signup"
-                  className="bg-blue-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                  className="bg-blue-600 text-white px-2 sm:px-3 md:px-4 py-1 sm:py-1.5 md:py-2 rounded-md text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
                   Sign Up
                 </Link>

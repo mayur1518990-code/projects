@@ -1,33 +1,11 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-
-// Extend Window interface for WebView message handlers
-declare global {
-  interface Window {
-    ReactNativeWebView?: {
-      postMessage: (message: string) => void;
-    };
-    webkit?: {
-      messageHandlers?: {
-        authSuccess?: {
-          postMessage: (data: any) => void;
-        };
-        googleAuth?: {
-          postMessage: (data: any) => void;
-        };
-        closeWebView?: {
-          postMessage: (data: any) => void;
-        };
-      };
-    };
-  }
-}
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -36,205 +14,6 @@ export default function LoginPage() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [isRedirecting, setIsRedirecting] = useState(false);
-
-  // Handle redirect result for mobile WebViews
-  useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        // Check if we're already processing a redirect
-        if (isRedirecting) {
-          return;
-        }
-
-        const result = await getRedirectResult(auth);
-        if (result) {
-          const user = result.user;
-          
-          // Check if user already exists in Firestore
-          const userDoc = await getDoc(doc(db, 'user', user.uid));
-          
-          let userData;
-          if (!userDoc.exists()) {
-            // Create new user in Firestore
-            userData = {
-              userId: user.uid,
-              name: user.displayName || user.email?.split('@')[0] || 'User',
-              email: user.email || '',
-              phone: user.phoneNumber || '',
-              createdAt: new Date().toISOString(),
-            };
-            
-            await setDoc(doc(db, 'user', user.uid), userData);
-          } else {
-            // User exists, get their data
-            userData = userDoc.data();
-          }
-          
-          // Store user data in localStorage
-          localStorage.setItem('user', JSON.stringify(userData));
-          localStorage.setItem('token', await user.getIdToken());
-          
-          // Clear any auth parameters from URL
-          const newUrl = new URL(window.location.href);
-          newUrl.search = '';
-          window.history.replaceState({}, '', newUrl.toString());
-          
-          // For mobile apps, send auth data and close WebView
-          const token = await user.getIdToken();
-          
-          // Force send auth data to native app and close WebView immediately
-          const authData = {
-            type: 'AUTH_SUCCESS',
-            success: true,
-            user: userData,
-            token: token,
-            userId: userData.userId,
-            userName: userData.name,
-            userEmail: userData.email,
-            timestamp: Date.now()
-          };
-          
-          console.log('Sending auth data to native app:', authData);
-          
-          // Send auth data immediately
-          if (window.ReactNativeWebView) {
-            console.log('Sending to React Native WebView');
-            window.ReactNativeWebView.postMessage(JSON.stringify(authData));
-          }
-          
-          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authSuccess) {
-            console.log('Sending to iOS WKWebView');
-            window.webkit.messageHandlers.authSuccess.postMessage(authData);
-          }
-          
-          // Create redirect URL with auth data
-          const authUrl = new URL('/', window.location.origin);
-          authUrl.searchParams.set('auth_success', 'true');
-          authUrl.searchParams.set('user_id', userData.userId);
-          authUrl.searchParams.set('user_name', userData.name);
-          authUrl.searchParams.set('user_email', userData.email);
-          authUrl.searchParams.set('token', token);
-          authUrl.searchParams.set('timestamp', Date.now().toString());
-          
-          // Force close WebView and redirect immediately
-          setTimeout(() => {
-            console.log('Force closing WebView and redirecting');
-            
-            // Send close message with redirect URL
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'CLOSE_WEBVIEW',
-                reason: 'auth_complete',
-                redirectUrl: authUrl.toString(),
-                userData: authData
-              }));
-            }
-            
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
-              window.webkit.messageHandlers.closeWebView.postMessage({
-                type: 'CLOSE_WEBVIEW',
-                reason: 'auth_complete',
-                redirectUrl: authUrl.toString(),
-                userData: authData
-              });
-            }
-            
-            // Force redirect as backup
-            window.location.href = authUrl.toString();
-          }, 1000);
-          
-          // Immediate close attempt
-          setTimeout(() => {
-            console.log('Immediate close attempt');
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'IMMEDIATE_CLOSE',
-                reason: 'auth_success',
-                userData: authData
-              }));
-            }
-            
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
-              window.webkit.messageHandlers.closeWebView.postMessage({
-                type: 'IMMEDIATE_CLOSE',
-                reason: 'auth_success',
-                userData: authData
-              });
-            }
-          }, 500);
-          
-          // Additional backup - try to close WebView after 3 seconds
-          setTimeout(() => {
-            console.log('Backup close attempt');
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'FORCE_CLOSE',
-                reason: 'auth_timeout'
-              }));
-            }
-            
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
-              window.webkit.messageHandlers.closeWebView.postMessage({
-                type: 'FORCE_CLOSE',
-                reason: 'auth_timeout'
-              });
-            }
-          }, 3000);
-        } else {
-          // Check if we're coming back from a redirect but no result
-          const urlParams = new URLSearchParams(window.location.search);
-          if (urlParams.get('state') || urlParams.get('code') || urlParams.get('error')) {
-            // We have auth parameters but no result - might be an error
-            const error = urlParams.get('error');
-            if (error) {
-              setError(`Authentication failed: ${error}`);
-            } else {
-              // No error but no result - might be a WebView issue
-              setError('Authentication completed but could not process result. Please try again.');
-            }
-            
-            // Clear the URL parameters to prevent loops
-            const newUrl = new URL(window.location.href);
-            newUrl.search = '';
-            window.history.replaceState({}, '', newUrl.toString());
-          }
-        }
-      } catch (error: any) {
-        console.error('Redirect result error:', error);
-        setError('Google sign-in failed. Please try again.');
-      }
-    };
-
-    handleRedirectResult();
-
-    // Listen for messages from native app
-    const handleNativeMessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'AUTH_RESPONSE') {
-          if (data.success) {
-            console.log('Native app confirmed auth success');
-            // Clear URL parameters
-            const newUrl = new URL(window.location.href);
-            newUrl.search = '';
-            window.history.replaceState({}, '', newUrl.toString());
-          } else {
-            console.error('Native app auth failed:', data.error);
-            setError(data.error || 'Authentication failed');
-          }
-        }
-      } catch (error) {
-        console.error('Error handling native message:', error);
-      }
-    };
-
-    window.addEventListener('message', handleNativeMessage);
-
-    return () => {
-      window.removeEventListener('message', handleNativeMessage);
-    };
-  }, [isRedirecting]);
 
   const validateEmail = useCallback((email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -320,49 +99,16 @@ export default function LoginPage() {
       
       const provider = new GoogleAuthProvider();
       
-      // Detect if we're in a mobile WebView
-      const ua = navigator.userAgent || '';
-      const isMobileWebView = /(wv|WebView|; wv\))/i.test(ua) || 
-        (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua)) ||
-        /Android.*wv|iPhone.*wv|iPad.*wv/i.test(ua) ||
-        window.ReactNativeWebView ||
-        (window.webkit && window.webkit.messageHandlers);
+      // Add additional scopes if needed
+      provider.addScope('email');
+      provider.addScope('profile');
       
-      let result;
+      // Set custom parameters to avoid popup issues
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
       
-      if (isMobileWebView) {
-        // For mobile WebViews, use redirect flow which is more reliable
-        if (!isRedirecting) {
-          setIsRedirecting(true);
-          try {
-            provider.setCustomParameters({
-              prompt: 'select_account'
-            });
-            
-            // Use redirect for WebViews - more reliable than popup
-            await signInWithRedirect(auth, provider);
-            return; // The redirect will handle the rest
-          } catch (redirectError: any) {
-            console.error('Redirect auth error:', redirectError);
-            setError(`Authentication failed: ${redirectError.message || 'Unknown error'}`);
-            setIsRedirecting(false);
-            return;
-          }
-        } else {
-          setError('Authentication is already in progress. Please wait...');
-          return;
-        }
-      } else {
-        // Use popup for regular browsers
-        provider.addScope('email');
-        provider.addScope('profile');
-        provider.setCustomParameters({
-          prompt: 'select_account'
-        });
-        
-        result = await signInWithPopup(auth, provider);
-      }
-      
+      const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
       // Check if user already exists in Firestore
@@ -422,19 +168,19 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8">
         <div className="max-w-md mx-auto">
-          <div className="bg-white rounded-lg shadow-md p-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">
+          <div className="bg-white rounded-lg shadow-md p-6 sm:p-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4 sm:mb-6 text-center">
               Login
             </h1>
 
-            <div className="mb-6">
+            <div className="mb-4 sm:mb-6">
               <button
                 onClick={handleGoogleSignIn}
-                className="w-full flex justify-center items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                className="w-full flex justify-center items-center px-3 sm:px-4 py-2.5 sm:py-2 border border-gray-300 rounded-md shadow-sm bg-white text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
               >
-                <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" viewBox="0 0 24 24">
                   <path
                     fill="#4285F4"
                     d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -456,18 +202,18 @@ export default function LoginPage() {
               </button>
             </div>
 
-            <div className="relative mb-6">
+            <div className="relative mb-4 sm:mb-6">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-300" />
               </div>
-              <div className="relative flex justify-center text-sm">
+              <div className="relative flex justify-center text-xs sm:text-sm">
                 <span className="px-2 bg-white text-gray-500">Or sign in with email</span>
               </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="email" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                   Email Address
                 </label>
                 <input
@@ -476,14 +222,14 @@ export default function LoginPage() {
                   name="email"
                   value={formData.email}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                   placeholder="Enter your email"
                   required
                 />
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="password" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                   Password
                 </label>
                 <input
@@ -492,14 +238,14 @@ export default function LoginPage() {
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                   placeholder="Enter your password"
                   required
                 />
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md text-sm">
+                <div className="bg-red-50 border border-red-200 text-red-600 px-3 sm:px-4 py-2 sm:py-3 rounded-md text-xs sm:text-sm">
                   {error}
                 </div>
               )}
@@ -507,15 +253,15 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full bg-blue-600 text-white py-2.5 sm:py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm sm:text-base font-medium"
               >
                 {isLoading ? "Logging In..." : "Login"}
               </button>
             </form>
 
 
-            <div className="mt-6 text-center">
-              <p className="text-sm text-gray-600">
+            <div className="mt-4 sm:mt-6 text-center">
+              <p className="text-xs sm:text-sm text-gray-600">
                 Don't have an account?{" "}
                 <Link
                   href="/signup"

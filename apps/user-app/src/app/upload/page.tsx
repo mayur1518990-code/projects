@@ -270,17 +270,17 @@ export default function UploadPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 md:py-8">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-900 mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4 sm:mb-6">
             Upload Documents
           </h1>
           
           {/* Upload Area */}
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">Upload Your Files</h2>
+          <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-4 sm:mb-6">
+            <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Upload Your Files</h2>
             <div
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+              className={`border-2 border-dashed rounded-lg p-4 sm:p-6 md:p-8 text-center transition-colors ${
                 dragActive
                   ? "border-blue-400 bg-blue-50"
                   : "border-gray-300 hover:border-gray-400"
@@ -298,39 +298,39 @@ export default function UploadPage() {
                 accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                 onChange={handleFileInput}
               />
-              <div className="space-y-4">
-                <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
-                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="space-y-3 sm:space-y-4">
+                <div className="mx-auto w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                  <svg className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                 </div>
                 <div>
                   {isUploading ? (
                     <div className="flex items-center justify-center space-x-2">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                      <span className="text-blue-600 font-medium text-lg">Uploading files...</span>
+                      <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-blue-600"></div>
+                      <span className="text-blue-600 font-medium text-base sm:text-lg">Uploading files...</span>
                     </div>
                   ) : (
                     <>
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="text-blue-600 hover:text-blue-700 font-medium text-lg"
+                        className="text-blue-600 hover:text-blue-700 font-medium text-base sm:text-lg"
                         disabled={isUploading}
                       >
                         Click to upload
                       </button>
-                      <p className="text-gray-500 mt-1">or drag and drop files here</p>
+                      <p className="text-gray-500 mt-1 text-sm sm:text-base">or drag and drop files here</p>
                     </>
                   )}
                 </div>
-                <p className="text-sm text-gray-500">
+                <p className="text-xs sm:text-sm text-gray-500">
                   PDF, DOC, DOCX, JPG, PNG up to 20MB each
                 </p>
               </div>
             </div>
             
             {error && (
-              <div className="mt-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md text-sm">
+              <div className="mt-3 sm:mt-4 bg-red-50 border border-red-200 text-red-600 px-3 sm:px-4 py-2 sm:py-3 rounded-md text-xs sm:text-sm">
                 {error}
               </div>
             )}
@@ -338,25 +338,29 @@ export default function UploadPage() {
 
           {/* Uploaded Files List */}
           {memoizedUploadedFiles.length > 0 && (
-            <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-              <h2 className="text-xl font-semibold mb-4">Uploaded Files</h2>
-              <div className="space-y-4">
+            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-4 sm:mb-6">
+              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Uploaded Files</h2>
+              <div className="space-y-3 sm:space-y-4">
                 {memoizedUploadedFiles.map((file) => (
-                  <div key={file.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        {getFileIcon(file.type)}
-                        <div>
-                          <p className="font-medium text-gray-900">{file.name}</p>
-                          <p className="text-sm text-gray-500">
+                  <div key={file.id} className="border border-gray-200 rounded-lg p-3 sm:p-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                      <div className="flex items-center space-x-3 min-w-0 flex-1">
+                        <div className="flex-shrink-0">
+                          {getFileIcon(file.type)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-900 truncate text-sm sm:text-base">{file.name}</p>
+                          <p className="text-xs sm:text-sm text-gray-500">
                             {formatFileSize(file.size)} • {file.uploadDate.toLocaleDateString()}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-3">
-                        {getStatusBadge(file.status)}
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+                        <div className="flex-shrink-0">
+                          {getStatusBadge(file.status)}
+                        </div>
                         {file.status === "pending" && (
-                          <div className="flex space-x-2">
+                          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                             <LazyPaymentButton
                               amount={100}
                               fileId={file.id}
@@ -378,9 +382,9 @@ export default function UploadPage() {
           )}
 
           {/* Instructions */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-blue-900 mb-2">How it works</h3>
-            <ol className="list-decimal list-inside space-y-2 text-blue-800">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 sm:p-6">
+            <h3 className="text-base sm:text-lg font-semibold text-blue-900 mb-2 sm:mb-3">How it works</h3>
+            <ol className="list-decimal list-inside space-y-1 sm:space-y-2 text-sm sm:text-base text-blue-800">
               <li>Upload your documents (PDF, images, Word docs, screenshots)</li>
               <li>Complete payment to process your files</li>
               <li>Generate QR codes for easy sharing and tracking</li>

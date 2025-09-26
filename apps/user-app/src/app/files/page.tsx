@@ -512,8 +512,8 @@ export default function FilesPage() {
 
           {/* Filter Tabs */}
           <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 mb-4 sm:mb-6">
-            <div className="flex justify-between items-center">
-              <div className="flex space-x-1 overflow-x-auto no-scrollbar [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4">
+              <div className="flex space-x-1 overflow-x-auto no-scrollbar [-ms-overflow-style:none] [scrollbar-width:none] pb-1 sm:pb-0">
                 {[
                   { key: "all", label: "All Files" },
                   { key: "pending_payment", label: "Pending Payment" },
@@ -524,7 +524,7 @@ export default function FilesPage() {
                   <button
                     key={tab.key}
                     onClick={() => setFilter(tab.key as any)}
-                    className={`px-3 sm:px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
+                    className={`px-2 sm:px-3 md:px-4 py-2 rounded-md text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${
                       filter === tab.key
                         ? "bg-blue-100 text-blue-700"
                         : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -680,28 +680,28 @@ export default function FilesPage() {
           )}
 
           {/* Stats */}
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg shadow-md p-4 text-center">
-              <div className="text-2xl font-bold text-gray-900">{files.length}</div>
-              <div className="text-sm text-gray-500">Total Files</div>
+          <div className="mt-6 sm:mt-8 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-gray-900">{files.length}</div>
+              <div className="text-xs sm:text-sm text-gray-500">Total Files</div>
             </div>
-            <div className="bg-white rounded-lg shadow-md p-4 text-center">
-              <div className="text-2xl font-bold text-yellow-600">
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-yellow-600">
                 {files.filter(f => f.status === "pending_payment").length}
               </div>
-              <div className="text-sm text-gray-500">Pending Payment</div>
+              <div className="text-xs sm:text-sm text-gray-500">Pending Payment</div>
             </div>
-            <div className="bg-white rounded-lg shadow-md p-4 text-center">
-              <div className="text-2xl font-bold text-green-600">
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-green-600">
                 {files.filter(f => f.status === "paid" || f.status === "processing" || f.status === "completed").length}
               </div>
-              <div className="text-sm text-gray-500">Paid</div>
+              <div className="text-xs sm:text-sm text-gray-500">Paid</div>
             </div>
-            <div className="bg-white rounded-lg shadow-md p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600">
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-blue-600">
                 {files.filter(f => f.status === "completed").length}
               </div>
-              <div className="text-sm text-gray-500">Completed</div>
+              <div className="text-xs sm:text-sm text-gray-500">Completed</div>
             </div>
           </div>
         </div>
