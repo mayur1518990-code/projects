@@ -330,19 +330,6 @@ export default function UploadPage() {
                         Choose Files
                       </button>
                       <p className="text-gray-500 mt-2 text-sm sm:text-base">or drag and drop files here</p>
-                      
-                      {/* Additional file input for better mobile support */}
-                      <div className="mt-3">
-                        <label className="block">
-                          <span className="sr-only">Choose files</span>
-                          <input
-                            type="file"
-                            multiple
-                            onChange={handleFileInput}
-                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                          />
-                        </label>
-                      </div>
                     </>
                   )}
                 </div>
