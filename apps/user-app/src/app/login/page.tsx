@@ -39,6 +39,11 @@ export default function LoginPage() {
   useEffect(() => {
     const handleRedirectResult = async () => {
       try {
+        // Check if we're already processing a redirect
+        if (isRedirecting) {
+          return;
+        }
+
         const result = await getRedirectResult(auth);
         if (result) {
           const user = result.user;
@@ -67,6 +72,11 @@ export default function LoginPage() {
           localStorage.setItem('user', JSON.stringify(userData));
           localStorage.setItem('token', await user.getIdToken());
           
+          // Clear any auth parameters from URL
+          const newUrl = new URL(window.location.href);
+          newUrl.search = '';
+          window.history.replaceState({}, '', newUrl.toString());
+          
           // For mobile apps, try to close the WebView and return to app
           if (window.ReactNativeWebView) {
             // React Native WebView
@@ -94,12 +104,13 @@ export default function LoginPage() {
               setError(`Authentication failed: ${error}`);
             } else {
               // No error but no result - might be a WebView issue
-              // Clear the URL parameters to prevent loops
-              const newUrl = new URL(window.location.href);
-              newUrl.search = '';
-              window.history.replaceState({}, '', newUrl.toString());
               setError('Authentication completed but could not process result. Please try again.');
             }
+            
+            // Clear the URL parameters to prevent loops
+            const newUrl = new URL(window.location.href);
+            newUrl.search = '';
+            window.history.replaceState({}, '', newUrl.toString());
           }
         }
       } catch (error: any) {
@@ -109,7 +120,7 @@ export default function LoginPage() {
     };
 
     handleRedirectResult();
-  }, []);
+  }, [isRedirecting]);
 
   const validateEmail = useCallback((email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -203,54 +214,26 @@ export default function LoginPage() {
       let result;
       
       if (isMobileWebView) {
-        // For mobile WebViews, try popup first, then fallback to redirect
-        try {
-          provider.addScope('email');
-          provider.addScope('profile');
-          provider.setCustomParameters({
-            prompt: 'select_account'
-          });
-          
-          // Try popup first - many WebViews support it now
-          // Add timeout to prevent hanging
-          const authPromise = signInWithPopup(auth, provider);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Authentication timeout')), 15000)
-          );
-          
-          result = await Promise.race([authPromise, timeoutPromise]) as any;
-        } catch (popupError: any) {
-          console.error('Popup auth error:', popupError);
-          if (popupError.code === 'auth/popup-closed-by-user') {
-            setError('Sign-in was cancelled. Please try again.');
-            return;
-          } else if (popupError.message === 'Authentication timeout') {
-            setError('Authentication timed out. Please try again.');
-            return;
-          } else if (popupError.code === 'auth/popup-blocked') {
-            // Popup blocked, try redirect as fallback
-            if (!isRedirecting) {
-              setIsRedirecting(true);
-              try {
-                provider.setCustomParameters({
-                  prompt: 'select_account'
-                });
-                await signInWithRedirect(auth, provider);
-                return; // The redirect will handle the rest
-              } catch (redirectError: any) {
-                console.error('Redirect auth error:', redirectError);
-                setError(`Authentication failed: ${redirectError.message || 'Unknown error'}`);
-                setIsRedirecting(false);
-                return;
-              }
-            } else {
-              setError('Authentication is already in progress. Please wait...');
-              return;
-            }
-          } else {
-            setError(`Authentication failed: ${popupError.message || 'Unknown error'}`);
+        // For mobile WebViews, use redirect flow which is more reliable
+        if (!isRedirecting) {
+          setIsRedirecting(true);
+          try {
+            provider.setCustomParameters({
+              prompt: 'select_account'
+            });
+            
+            // Use redirect for WebViews - more reliable than popup
+            await signInWithRedirect(auth, provider);
+            return; // The redirect will handle the rest
+          } catch (redirectError: any) {
+            console.error('Redirect auth error:', redirectError);
+            setError(`Authentication failed: ${redirectError.message || 'Unknown error'}`);
+            setIsRedirecting(false);
             return;
           }
+        } else {
+          setError('Authentication is already in progress. Please wait...');
+          return;
         }
       } else {
         // Use popup for regular browsers
