@@ -153,6 +153,13 @@ export default function FilesPage() {
         throw new Error(result.message || 'Failed to load files');
       }
       
+      // Load locally-recorded paid IDs to temporarily override server lag
+      let localPaidIds: Set<string> = new Set();
+      try {
+        const raw = localStorage.getItem('paidFileIds');
+        localPaidIds = new Set((raw ? JSON.parse(raw) : []) as string[]);
+      } catch {}
+
       // Transform the data to match our interface
       const transformedFiles: FileData[] = result.files.map((file: any) => {
         // Map database status to UI status
@@ -176,7 +183,12 @@ export default function FilesPage() {
           default:
             uiStatus = 'pending_payment';
         }
-        
+        // If we have a locally recorded paid status and server hasn't caught up yet,
+        // keep showing as paid until backend updates to processing/completed.
+        if ((uiStatus === 'pending_payment') && localPaidIds.has(file.id)) {
+          uiStatus = 'paid';
+        }
+
         return {
           id: file.id,
           name: file.originalName,
@@ -205,6 +217,22 @@ export default function FilesPage() {
       filesDataRef.current = transformedFiles;
       lastFetchTimeRef.current = now;
       setFiles(transformedFiles);
+
+      // Cleanup local overrides when server shows completed (or file missing)
+      try {
+        const key = 'paidFileIds';
+        const raw = localStorage.getItem(key);
+        const existing: string[] = raw ? JSON.parse(raw) : [];
+        if (existing.length) {
+          const stillPendingIds = new Set(transformedFiles
+            .filter(f => f.status === 'paid' || f.status === 'pending_payment' || f.status === 'processing')
+            .map(f => f.id));
+          const cleaned = existing.filter(id => stillPendingIds.has(id));
+          if (cleaned.length !== existing.length) {
+            localStorage.setItem(key, JSON.stringify(cleaned));
+          }
+        }
+      } catch {}
     } catch (error: any) {
       if (error.name === 'AbortError') {
         setError('Request timeout - please try again');
@@ -313,6 +341,16 @@ export default function FilesPage() {
     filesDataRef.current = filesDataRef.current.map(file =>
       file.id === fileId ? { ...file, status: "paid" as const } : file
     );
+
+    // Persist paid status locally to survive refresh
+    try {
+      const key = 'paidFileIds';
+      const existingRaw = localStorage.getItem(key);
+      const existing: string[] = existingRaw ? JSON.parse(existingRaw) : [];
+      if (!existing.includes(fileId)) {
+        localStorage.setItem(key, JSON.stringify([...existing, fileId]));
+      }
+    } catch {}
   };
 
   // Function to refresh data when new files are detected
@@ -455,6 +493,16 @@ export default function FilesPage() {
       // Update cached data as well
       filesDataRef.current = filesDataRef.current.filter(file => file.id !== fileId);
       
+      // Remove any local paid override for this file
+      try {
+        const key = 'paidFileIds';
+        const raw = localStorage.getItem(key);
+        const existing: string[] = raw ? JSON.parse(raw) : [];
+        if (existing.includes(fileId)) {
+          localStorage.setItem(key, JSON.stringify(existing.filter(id => id !== fileId)));
+        }
+      } catch {}
+
     } catch (error: any) {
       // Revert optimistic update on error
       setFiles(originalFiles);
