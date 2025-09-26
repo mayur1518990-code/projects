@@ -86,7 +86,7 @@ export default function SignupPage() {
           // For mobile apps, send auth data and close WebView
           const token = await user.getIdToken();
           
-          // Force send auth data to native app with multiple methods
+          // Force send auth data to native app and close WebView immediately
           const authData = {
             type: 'AUTH_SUCCESS',
             success: true,
@@ -100,22 +100,18 @@ export default function SignupPage() {
           
           console.log('Sending auth data to native app:', authData);
           
-          // Method 1: React Native WebView
+          // Send auth data immediately
           if (window.ReactNativeWebView) {
-            console.log('Using React Native WebView communication');
+            console.log('Sending to React Native WebView');
             window.ReactNativeWebView.postMessage(JSON.stringify(authData));
           }
           
-          // Method 2: iOS WKWebView
-          if (window.webkit && window.webkit.messageHandlers) {
-            console.log('Using iOS WKWebView communication');
-            if (window.webkit.messageHandlers.authSuccess) {
-              window.webkit.messageHandlers.authSuccess.postMessage(authData);
-            }
+          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authSuccess) {
+            console.log('Sending to iOS WKWebView');
+            window.webkit.messageHandlers.authSuccess.postMessage(authData);
           }
           
-          // Method 3: Force redirect with auth data in URL (most reliable)
-          console.log('Using URL redirect method for native app');
+          // Create redirect URL with auth data
           const authUrl = new URL('/', window.location.origin);
           authUrl.searchParams.set('auth_success', 'true');
           authUrl.searchParams.set('user_id', userData.userId);
@@ -124,59 +120,70 @@ export default function SignupPage() {
           authUrl.searchParams.set('token', token);
           authUrl.searchParams.set('timestamp', Date.now().toString());
           
-          // Send multiple messages with different timing
-          const sendMessages = () => {
-            // Send auth success message
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'USER_AUTHENTICATED',
-                userId: userData.userId,
-                userName: userData.name,
-                userEmail: userData.email,
-                token: token,
-                timestamp: Date.now()
-              }));
-            }
+          // Force close WebView and redirect immediately
+          setTimeout(() => {
+            console.log('Force closing WebView and redirecting');
             
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authSuccess) {
-              window.webkit.messageHandlers.authSuccess.postMessage({
-                type: 'USER_AUTHENTICATED',
-                userId: userData.userId,
-                userName: userData.name,
-                userEmail: userData.email,
-                token: token,
-                timestamp: Date.now()
-              });
-            }
-          };
-          
-          // Send messages immediately and with delays
-          sendMessages();
-          setTimeout(sendMessages, 500);
-          setTimeout(sendMessages, 1000);
-          
-          // Force redirect after 2 seconds (this ensures native app gets the data)
-          setTimeout(() => {
-            console.log('Force redirecting to native app with auth data');
-            window.location.href = authUrl.toString();
-          }, 2000);
-          
-          // Also try to close WebView
-          setTimeout(() => {
+            // Send close message with redirect URL
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'CLOSE_WEBVIEW',
-                reason: 'auth_complete'
+                reason: 'auth_complete',
+                redirectUrl: authUrl.toString(),
+                userData: authData
               }));
             }
             
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
               window.webkit.messageHandlers.closeWebView.postMessage({
                 type: 'CLOSE_WEBVIEW',
-                reason: 'auth_complete'
+                reason: 'auth_complete',
+                redirectUrl: authUrl.toString(),
+                userData: authData
               });
             }
-          }, 2500);
+            
+            // Force redirect as backup
+            window.location.href = authUrl.toString();
+          }, 1000);
+          
+          // Immediate close attempt
+          setTimeout(() => {
+            console.log('Immediate close attempt');
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'IMMEDIATE_CLOSE',
+                reason: 'auth_success',
+                userData: authData
+              }));
+            }
+            
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
+              window.webkit.messageHandlers.closeWebView.postMessage({
+                type: 'IMMEDIATE_CLOSE',
+                reason: 'auth_success',
+                userData: authData
+              });
+            }
+          }, 500);
+          
+          // Additional backup - try to close WebView after 3 seconds
+          setTimeout(() => {
+            console.log('Backup close attempt');
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'FORCE_CLOSE',
+                reason: 'auth_timeout'
+              }));
+            }
+            
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
+              window.webkit.messageHandlers.closeWebView.postMessage({
+                type: 'FORCE_CLOSE',
+                reason: 'auth_timeout'
+              });
+            }
+          }, 3000);
         } else {
           // Check if we're coming back from a redirect but no result
           const urlParams = new URLSearchParams(window.location.search);
