@@ -86,83 +86,97 @@ export default function SignupPage() {
           // For mobile apps, send auth data and close WebView
           const token = await user.getIdToken();
           
+          // Force send auth data to native app with multiple methods
+          const authData = {
+            type: 'AUTH_SUCCESS',
+            success: true,
+            user: userData,
+            token: token,
+            userId: userData.userId,
+            userName: userData.name,
+            userEmail: userData.email,
+            timestamp: Date.now()
+          };
+          
+          console.log('Sending auth data to native app:', authData);
+          
+          // Method 1: React Native WebView
           if (window.ReactNativeWebView) {
-            // React Native WebView
-            console.log('Sending auth data to React Native WebView:', userData);
-            
-            // Send comprehensive auth data
-            const authData = {
-              type: 'AUTH_SUCCESS',
-              success: true,
-              user: userData,
-              token: token,
-              userId: userData.userId,
-              userName: userData.name,
-              userEmail: userData.email,
-              timestamp: Date.now()
-            };
-            
+            console.log('Using React Native WebView communication');
             window.ReactNativeWebView.postMessage(JSON.stringify(authData));
-            
-            // Also send individual messages for better compatibility
-            setTimeout(() => {
-              window.ReactNativeWebView?.postMessage(JSON.stringify({
+          }
+          
+          // Method 2: iOS WKWebView
+          if (window.webkit && window.webkit.messageHandlers) {
+            console.log('Using iOS WKWebView communication');
+            if (window.webkit.messageHandlers.authSuccess) {
+              window.webkit.messageHandlers.authSuccess.postMessage(authData);
+            }
+          }
+          
+          // Method 3: Force redirect with auth data in URL (most reliable)
+          console.log('Using URL redirect method for native app');
+          const authUrl = new URL('/', window.location.origin);
+          authUrl.searchParams.set('auth_success', 'true');
+          authUrl.searchParams.set('user_id', userData.userId);
+          authUrl.searchParams.set('user_name', userData.name);
+          authUrl.searchParams.set('user_email', userData.email);
+          authUrl.searchParams.set('token', token);
+          authUrl.searchParams.set('timestamp', Date.now().toString());
+          
+          // Send multiple messages with different timing
+          const sendMessages = () => {
+            // Send auth success message
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'USER_AUTHENTICATED',
                 userId: userData.userId,
                 userName: userData.name,
                 userEmail: userData.email,
-                token: token
+                token: token,
+                timestamp: Date.now()
               }));
-            }, 500);
+            }
             
-            // Close WebView after sending data
-            setTimeout(() => {
-              window.ReactNativeWebView?.postMessage(JSON.stringify({
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authSuccess) {
+              window.webkit.messageHandlers.authSuccess.postMessage({
+                type: 'USER_AUTHENTICATED',
+                userId: userData.userId,
+                userName: userData.name,
+                userEmail: userData.email,
+                token: token,
+                timestamp: Date.now()
+              });
+            }
+          };
+          
+          // Send messages immediately and with delays
+          sendMessages();
+          setTimeout(sendMessages, 500);
+          setTimeout(sendMessages, 1000);
+          
+          // Force redirect after 2 seconds (this ensures native app gets the data)
+          setTimeout(() => {
+            console.log('Force redirecting to native app with auth data');
+            window.location.href = authUrl.toString();
+          }, 2000);
+          
+          // Also try to close WebView
+          setTimeout(() => {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'CLOSE_WEBVIEW',
                 reason: 'auth_complete'
               }));
-            }, 1500);
-            
-          } else if (window.webkit && window.webkit.messageHandlers) {
-            // iOS WKWebView
-            console.log('Sending auth data to iOS WKWebView:', userData);
-            
-            const authData = {
-              type: 'AUTH_SUCCESS',
-              success: true,
-              user: userData,
-              token: token,
-              userId: userData.userId,
-              userName: userData.name,
-              userEmail: userData.email,
-              timestamp: Date.now()
-            };
-            
-            if (window.webkit.messageHandlers.authSuccess) {
-              window.webkit.messageHandlers.authSuccess.postMessage(authData);
             }
             
-            // Also try to close the WebView
-            setTimeout(() => {
-              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
-                window.webkit.messageHandlers.closeWebView.postMessage({
-                  type: 'CLOSE_WEBVIEW',
-                  reason: 'auth_complete'
-                });
-              }
-            }, 1500);
-            
-          } else {
-            // Fallback: redirect to home page with auth success parameters
-            console.log('No WebView detected, redirecting to home page with auth data');
-            const authUrl = new URL('/', window.location.origin);
-            authUrl.searchParams.set('auth_success', 'true');
-            authUrl.searchParams.set('user_id', userData.userId);
-            authUrl.searchParams.set('user_name', userData.name);
-            authUrl.searchParams.set('user_email', userData.email);
-            authUrl.searchParams.set('token', token);
-            window.location.href = authUrl.toString();
-          }
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
+              window.webkit.messageHandlers.closeWebView.postMessage({
+                type: 'CLOSE_WEBVIEW',
+                reason: 'auth_complete'
+              });
+            }
+          }, 2500);
         } else {
           // Check if we're coming back from a redirect but no result
           const urlParams = new URLSearchParams(window.location.search);
@@ -314,7 +328,10 @@ export default function SignupPage() {
       // Detect if we're in a mobile WebView
       const ua = navigator.userAgent || '';
       const isMobileWebView = /(wv|WebView|; wv\))/i.test(ua) || 
-        (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
+        (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua)) ||
+        /Android.*wv|iPhone.*wv|iPad.*wv/i.test(ua) ||
+        window.ReactNativeWebView ||
+        (window.webkit && window.webkit.messageHandlers);
       
       let result;
       
