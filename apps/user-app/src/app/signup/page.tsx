@@ -224,11 +224,20 @@ export default function SignupPage() {
           });
           
           // Try popup first - many WebViews support it now
-          result = await signInWithPopup(auth, provider);
+          // Add timeout to prevent hanging
+          const authPromise = signInWithPopup(auth, provider);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Authentication timeout')), 15000)
+          );
+          
+          result = await Promise.race([authPromise, timeoutPromise]) as any;
         } catch (popupError: any) {
           console.error('Popup auth error:', popupError);
           if (popupError.code === 'auth/popup-closed-by-user') {
             setError('Sign-up was cancelled. Please try again.');
+            return;
+          } else if (popupError.message === 'Authentication timeout') {
+            setError('Authentication timed out. Please try again.');
             return;
           } else if (popupError.code === 'auth/popup-blocked') {
             // Popup blocked, try redirect as fallback
