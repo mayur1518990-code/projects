@@ -198,14 +198,23 @@ export default function LoginPage() {
       let result;
       
       if (isMobileWebView) {
-        // Use redirect for mobile WebViews
-        provider.setCustomParameters({
-          prompt: 'select_account'
-        });
-        
-        // For WebViews, we need to use redirect instead of popup
-        await signInWithRedirect(auth, provider);
-        return; // The redirect will handle the rest
+        // For mobile WebViews, try popup first, fallback to redirect
+        try {
+          result = await signInWithPopup(auth, provider);
+        } catch (popupError: any) {
+          if (popupError.code === 'auth/popup-closed-by-user' || 
+              popupError.code === 'auth/popup-blocked' ||
+              popupError.code === 'auth/cancelled-popup-request') {
+            // Popup failed, try redirect
+            provider.setCustomParameters({
+              prompt: 'select_account'
+            });
+            await signInWithRedirect(auth, provider);
+            return; // The redirect will handle the rest
+          } else {
+            throw popupError;
+          }
+        }
       } else {
         // Use popup for regular browsers
         provider.addScope('email');
