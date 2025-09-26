@@ -83,19 +83,47 @@ export default function SignupPage() {
           // For mobile apps, try to close the WebView and return to app
           if (window.ReactNativeWebView) {
             // React Native WebView
+            console.log('Sending message to React Native WebView:', userData);
             window.ReactNativeWebView.postMessage(JSON.stringify({
               type: 'AUTH_SUCCESS',
-              user: userData
+              user: userData,
+              token: await user.getIdToken()
             }));
-          } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authSuccess) {
+            
+            // Also try to close the WebView
+            setTimeout(() => {
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'CLOSE_WEBVIEW'
+                }));
+              }
+            }, 1000);
+          } else if (window.webkit && window.webkit.messageHandlers) {
             // iOS WKWebView
-            window.webkit.messageHandlers.authSuccess.postMessage({
-              type: 'AUTH_SUCCESS',
-              user: userData
-            });
+            console.log('Sending message to iOS WKWebView:', userData);
+            if (window.webkit.messageHandlers.authSuccess) {
+              window.webkit.messageHandlers.authSuccess.postMessage({
+                type: 'AUTH_SUCCESS',
+                user: userData,
+                token: await user.getIdToken()
+              });
+            }
+            
+            // Also try to close the WebView
+            setTimeout(() => {
+              if (window.webkit.messageHandlers.closeWebView) {
+                window.webkit.messageHandlers.closeWebView.postMessage({});
+              }
+            }, 1000);
           } else {
-            // Fallback: redirect to home page
-            window.location.href = "/";
+            // Fallback: redirect to home page with auth success parameters
+            console.log('No WebView detected, redirecting to home page with auth data');
+            const authUrl = new URL('/', window.location.origin);
+            authUrl.searchParams.set('auth_success', 'true');
+            authUrl.searchParams.set('user_id', userData.userId);
+            authUrl.searchParams.set('user_name', userData.name);
+            authUrl.searchParams.set('user_email', userData.email);
+            window.location.href = authUrl.toString();
           }
         } else {
           // Check if we're coming back from a redirect but no result
@@ -123,6 +151,33 @@ export default function SignupPage() {
     };
 
     handleRedirectResult();
+
+    // Listen for messages from native app
+    const handleNativeMessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'AUTH_RESPONSE') {
+          if (data.success) {
+            console.log('Native app confirmed auth success');
+            // Clear URL parameters
+            const newUrl = new URL(window.location.href);
+            newUrl.search = '';
+            window.history.replaceState({}, '', newUrl.toString());
+          } else {
+            console.error('Native app auth failed:', data.error);
+            setError(data.error || 'Authentication failed');
+          }
+        }
+      } catch (error) {
+        console.error('Error handling native message:', error);
+      }
+    };
+
+    window.addEventListener('message', handleNativeMessage);
+
+    return () => {
+      window.removeEventListener('message', handleNativeMessage);
+    };
   }, [isRedirecting]);
 
   const validateEmail = useCallback((email: string) => {
