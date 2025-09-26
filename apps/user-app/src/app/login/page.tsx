@@ -48,8 +48,23 @@ export default function LoginPage() {
           
           localStorage.setItem('token', await user.getIdToken());
           
-          // Redirect to home page
-          window.location.href = "/";
+          // For mobile apps, try to close the WebView and return to app
+          if (window.ReactNativeWebView) {
+            // React Native WebView
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'AUTH_SUCCESS',
+              user: userData
+            }));
+          } else if (window.webkit && window.webkit.messageHandlers) {
+            // iOS WKWebView
+            window.webkit.messageHandlers.authSuccess.postMessage({
+              type: 'AUTH_SUCCESS',
+              user: userData
+            });
+          } else {
+            // Fallback: redirect to home page
+            window.location.href = "/";
+          }
         }
       } catch (error: any) {
         console.error('Redirect result error:', error);
@@ -154,8 +169,7 @@ export default function LoginPage() {
       if (isMobileWebView) {
         // Use redirect for mobile WebViews
         provider.setCustomParameters({
-          prompt: 'select_account',
-          redirect_uri: window.location.origin + '/login'
+          prompt: 'select_account'
         });
         
         // For WebViews, we need to use redirect instead of popup
