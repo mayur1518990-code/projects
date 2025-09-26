@@ -108,7 +108,7 @@ export default function LoginPage() {
             
             // Also try to close the WebView
             setTimeout(() => {
-              if (window.webkit.messageHandlers.closeWebView) {
+              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.closeWebView) {
                 window.webkit.messageHandlers.closeWebView.postMessage({});
               }
             }, 1000);
