@@ -2,9 +2,7 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { signIn } from "next-auth/react";
 
 export default function SignupPage() {
   const [formData, setFormData] = useState({
