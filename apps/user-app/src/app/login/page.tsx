@@ -83,22 +83,6 @@ export default function LoginPage() {
             // Fallback: redirect to home page
             window.location.href = "/";
           }
-        } else {
-          // Check if we're in a mobile WebView and no redirect result
-          const ua = navigator.userAgent || '';
-          const isMobileWebView = /(wv|WebView|; wv\))/i.test(ua) || 
-            (!/Chrome\//i.test(ua) && /Version\//i.test(ua) && /Mobile/i.test(ua));
-          
-          if (isMobileWebView) {
-            // If we're in a WebView and no redirect result, we might be stuck in a loop
-            // Try to detect if we just came back from Google auth
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('state') || urlParams.get('code')) {
-              // We have auth parameters, but getRedirectResult didn't work
-              // This might be a WebView issue, so redirect to home
-              window.location.href = "/";
-            }
-          }
         }
       } catch (error: any) {
         console.error('Redirect result error:', error);
@@ -227,40 +211,30 @@ export default function LoginPage() {
       let result;
       
       if (isMobileWebView) {
-        // For mobile WebViews, use a different approach
-        // Try to use the app's native auth if available
-        if (window.ReactNativeWebView) {
-          // Send message to native app to handle Google auth
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'GOOGLE_AUTH_REQUEST',
-            action: 'signin'
-          }));
-          return; // Let the native app handle it
-        } else if (window.webkit && window.webkit.messageHandlers) {
-          // Send message to iOS app to handle Google auth
-          window.webkit.messageHandlers.googleAuth?.postMessage({
-            type: 'GOOGLE_AUTH_REQUEST',
-            action: 'signin'
+        // For mobile WebViews, use popup directly - most modern WebViews support it
+        try {
+          provider.addScope('email');
+          provider.addScope('profile');
+          provider.setCustomParameters({
+            prompt: 'select_account'
           });
-          return; // Let the native app handle it
-        } else {
-          // Fallback: try popup first, then redirect
-          try {
-            result = await signInWithPopup(auth, provider);
-          } catch (popupError: any) {
-            if (popupError.code === 'auth/popup-closed-by-user' || 
-                popupError.code === 'auth/popup-blocked' ||
-                popupError.code === 'auth/cancelled-popup-request') {
-              // Popup failed, try redirect
-              provider.setCustomParameters({
-                prompt: 'select_account'
-              });
-              
-              await signInWithRedirect(auth, provider);
-              return; // The redirect will handle the rest
-            } else {
-              throw popupError;
-            }
+          
+          result = await signInWithPopup(auth, provider);
+        } catch (popupError: any) {
+          if (popupError.code === 'auth/popup-closed-by-user') {
+            setError('Sign-in was cancelled. Please try again.');
+            return;
+          } else if (popupError.code === 'auth/popup-blocked') {
+            setError('Popup was blocked. Please allow popups and try again.');
+            return;
+          } else {
+            // For other errors, try redirect as fallback
+            provider.setCustomParameters({
+              prompt: 'select_account'
+            });
+            
+            await signInWithRedirect(auth, provider);
+            return; // The redirect will handle the rest
           }
         }
       } else {
