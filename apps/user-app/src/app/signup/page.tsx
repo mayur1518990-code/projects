@@ -86,6 +86,19 @@ export default function SignupPage() {
             // Fallback: redirect to home page
             window.location.href = "/";
           }
+        } else {
+          // Check if we're coming back from a redirect but no result
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get('state') || urlParams.get('code') || urlParams.get('error')) {
+            // We have auth parameters but no result - might be an error
+            const error = urlParams.get('error');
+            if (error) {
+              setError(`Authentication failed: ${error}`);
+            } else {
+              // No error but no result - might be a WebView issue
+              setError('Authentication completed but could not process result. Please try again.');
+            }
+          }
         }
       } catch (error: any) {
         console.error('Redirect result error:', error);
@@ -93,33 +106,7 @@ export default function SignupPage() {
       }
     };
 
-    // Listen for messages from native app
-    const handleNativeAuthResult = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'NATIVE_AUTH_RESULT') {
-          if (data.success) {
-            // Store user data from native app
-            localStorage.setItem('user', JSON.stringify(data.user));
-            localStorage.setItem('token', data.token);
-            
-            // Redirect to home page
-            window.location.href = "/";
-          } else {
-            setError(data.error || 'Authentication failed');
-          }
-        }
-      } catch (error) {
-        console.error('Error handling native auth result:', error);
-      }
-    };
-
-    window.addEventListener('message', handleNativeAuthResult);
     handleRedirectResult();
-
-    return () => {
-      window.removeEventListener('message', handleNativeAuthResult);
-    };
   }, []);
 
   const validateEmail = useCallback((email: string) => {
@@ -223,37 +210,19 @@ export default function SignupPage() {
       let result;
       
       if (isMobileWebView) {
-        // For mobile WebViews, use popup with timeout to prevent hanging
+        // For mobile WebViews, use redirect flow which is more reliable
         try {
-          provider.addScope('email');
-          provider.addScope('profile');
           provider.setCustomParameters({
             prompt: 'select_account'
           });
           
-          // Add timeout to prevent hanging
-          const authPromise = signInWithPopup(auth, provider);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Authentication timeout')), 30000)
-          );
-          
-          result = await Promise.race([authPromise, timeoutPromise]) as any;
-        } catch (popupError: any) {
-          console.error('Popup auth error:', popupError);
-          if (popupError.code === 'auth/popup-closed-by-user') {
-            setError('Sign-up was cancelled. Please try again.');
-            return;
-          } else if (popupError.code === 'auth/popup-blocked') {
-            setError('Popup was blocked. Please allow popups and try again.');
-            return;
-          } else if (popupError.message === 'Authentication timeout') {
-            setError('Authentication timed out. Please try again.');
-            return;
-          } else {
-            // For other errors, show the error but don't try redirect to avoid loops
-            setError(`Authentication failed: ${popupError.message || 'Unknown error'}`);
-            return;
-          }
+          // Use redirect for WebViews - more reliable than popup
+          await signInWithRedirect(auth, provider);
+          return; // The redirect will handle the rest
+        } catch (redirectError: any) {
+          console.error('Redirect auth error:', redirectError);
+          setError(`Authentication failed: ${redirectError.message || 'Unknown error'}`);
+          return;
         }
       } else {
         // Use popup for regular browsers
