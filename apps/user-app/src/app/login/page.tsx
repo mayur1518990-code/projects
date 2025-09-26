@@ -42,9 +42,10 @@ export default function LoginPage() {
           // Check if user already exists in Firestore
           const userDoc = await getDoc(doc(db, 'user', user.uid));
           
+          let userData;
           if (!userDoc.exists()) {
             // Create new user in Firestore
-            const userData = {
+            userData = {
               userId: user.uid,
               name: user.displayName || user.email?.split('@')[0] || 'User',
               email: user.email || '',
@@ -53,15 +54,13 @@ export default function LoginPage() {
             };
             
             await setDoc(doc(db, 'user', user.uid), userData);
-            
-            // Store user data in localStorage
-            localStorage.setItem('user', JSON.stringify(userData));
           } else {
             // User exists, get their data
-            const userData = userDoc.data();
-            localStorage.setItem('user', JSON.stringify(userData));
+            userData = userDoc.data();
           }
           
+          // Store user data in localStorage
+          localStorage.setItem('user', JSON.stringify(userData));
           localStorage.setItem('token', await user.getIdToken());
           
           // For mobile apps, try to close the WebView and return to app
