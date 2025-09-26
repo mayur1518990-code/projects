@@ -38,14 +38,14 @@ export const authOptions: AuthOptions = {
     },
     async jwt({ token, account, profile, user }) {
       if (account) {
-        token.accessToken = account.access_token
-        token.userId = user?.id
+        (token as any).accessToken = account.access_token
+        (token as any).userId = user?.id
       }
       return token
     },
     async session({ session, token }) {
-      (session as any).accessToken = token.accessToken
-      (session as any).userId = token.userId
+      (session as any).accessToken = (token as any).accessToken
+      (session as any).userId = (token as any).userId
       return session
     },
   },
