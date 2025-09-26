@@ -1,6 +1,5 @@
 import NextAuth, { AuthOptions } from "next-auth"
 import GoogleProvider from "next-auth/providers/google"
-import { adminDb } from "./firebase-admin"
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -10,42 +9,14 @@ export const authOptions: AuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn({ user, account, profile }) {
-      if (account?.provider === 'google') {
-        try {
-          // Check if user exists in Firestore
-          const userDoc = await adminDb.collection('user').doc(user.id).get();
-          
-          if (!userDoc.exists) {
-            // Create new user in Firestore
-            const userData = {
-              userId: user.id,
-              name: user.name || user.email?.split('@')[0] || 'User',
-              email: user.email || '',
-              phone: '',
-              createdAt: new Date().toISOString(),
-            };
-            
-            await adminDb.collection('user').doc(user.id).set(userData);
-          }
-          return true;
-        } catch (error) {
-          console.error('Error creating user:', error);
-          return false;
-        }
-      }
-      return true;
-    },
-    async jwt({ token, account, profile, user }) {
+    async jwt({ token, account, profile }) {
       if (account) {
-        (token as any).accessToken = account.access_token
-        (token as any).userId = user?.id
+        token.accessToken = account.access_token
       }
       return token
     },
     async session({ session, token }) {
-      (session as any).accessToken = (token as any).accessToken
-      (session as any).userId = (token as any).userId
+      (session as any).accessToken = token.accessToken
       return session
     },
   },
