@@ -211,7 +211,7 @@ export default function LoginPage() {
       let result;
       
       if (isMobileWebView) {
-        // For mobile WebViews, use popup directly - most modern WebViews support it
+        // For mobile WebViews, use popup with timeout to prevent hanging
         try {
           provider.addScope('email');
           provider.addScope('profile');
@@ -219,22 +219,28 @@ export default function LoginPage() {
             prompt: 'select_account'
           });
           
-          result = await signInWithPopup(auth, provider);
+          // Add timeout to prevent hanging
+          const authPromise = signInWithPopup(auth, provider);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Authentication timeout')), 30000)
+          );
+          
+          result = await Promise.race([authPromise, timeoutPromise]) as any;
         } catch (popupError: any) {
+          console.error('Popup auth error:', popupError);
           if (popupError.code === 'auth/popup-closed-by-user') {
             setError('Sign-in was cancelled. Please try again.');
             return;
           } else if (popupError.code === 'auth/popup-blocked') {
             setError('Popup was blocked. Please allow popups and try again.');
             return;
+          } else if (popupError.message === 'Authentication timeout') {
+            setError('Authentication timed out. Please try again.');
+            return;
           } else {
-            // For other errors, try redirect as fallback
-            provider.setCustomParameters({
-              prompt: 'select_account'
-            });
-            
-            await signInWithRedirect(auth, provider);
-            return; // The redirect will handle the rest
+            // For other errors, show the error but don't try redirect to avoid loops
+            setError(`Authentication failed: ${popupError.message || 'Unknown error'}`);
+            return;
           }
         }
       } else {
