@@ -57,8 +57,19 @@ export default function UploadPage() {
     "image/jpeg",
     "image/jpg", 
     "image/png",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
     "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "application/rtf",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/zip",
+    "application/x-rar-compressed"
   ];
 
   const formatFileSize = useCallback((bytes: number) => {
@@ -170,7 +181,7 @@ export default function UploadPage() {
 
         // Validate file type
         if (!ALLOWED_TYPES.includes(file.type)) {
-          throw new Error(`File "${file.name}" is not supported. Allowed types: PDF, images, Word docs.`);
+          throw new Error(`File "${file.name}" is not supported. Allowed types: PDF, images, Word docs, Excel, PowerPoint, text files, and archives.`);
         }
 
         // Upload to server
@@ -295,7 +306,7 @@ export default function UploadPage() {
                 type="file"
                 className="hidden"
                 multiple
-                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.txt,.rtf,.xls,.xlsx,.ppt,.pptx,.zip,.rar"
                 onChange={handleFileInput}
               />
               <div className="space-y-3 sm:space-y-4">
@@ -314,17 +325,17 @@ export default function UploadPage() {
                     <>
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="text-blue-600 hover:text-blue-700 font-medium text-base sm:text-lg"
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm sm:text-base hover:bg-blue-700 transition-colors"
                         disabled={isUploading}
                       >
-                        Click to upload
+                        Choose Files
                       </button>
-                      <p className="text-gray-500 mt-1 text-sm sm:text-base">or drag and drop files here</p>
+                      <p className="text-gray-500 mt-2 text-sm sm:text-base">or drag and drop files here</p>
                     </>
                   )}
                 </div>
                 <p className="text-xs sm:text-sm text-gray-500">
-                  PDF, DOC, DOCX, JPG, PNG up to 20MB each
+                  PDF, DOC, DOCX, JPG, PNG, GIF, TXT, XLS, PPT, ZIP and more up to 20MB each
                 </p>
               </div>
             </div>
@@ -385,7 +396,7 @@ export default function UploadPage() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 sm:p-6">
             <h3 className="text-base sm:text-lg font-semibold text-blue-900 mb-2 sm:mb-3">How it works</h3>
             <ol className="list-decimal list-inside space-y-1 sm:space-y-2 text-sm sm:text-base text-blue-800">
-              <li>Upload your documents (PDF, images, Word docs, screenshots)</li>
+              <li>Upload your files (PDF, images, Word docs, Excel, PowerPoint, text files, archives)</li>
               <li>Complete payment to process your files</li>
               <li>Generate QR codes for easy sharing and tracking</li>
               <li>Track your files in the "My Files" section</li>
