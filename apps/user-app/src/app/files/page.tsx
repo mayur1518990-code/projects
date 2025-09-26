@@ -320,6 +320,20 @@ export default function FilesPage() {
     loadFiles(true); // Force refresh
   }, [loadFiles]);
 
+  // Throttled auto-refresh trigger to avoid excessive requests
+  const lastAutoRefreshRef = useRef<number>(0);
+  const AUTO_REFRESH_COOLDOWN_MS = 8000; // 8s cooldown between auto refreshes
+
+  const tryAutoRefresh = useCallback((reason?: string) => {
+    const now = Date.now();
+    if (now - lastAutoRefreshRef.current < AUTO_REFRESH_COOLDOWN_MS) return;
+    lastAutoRefreshRef.current = now;
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Files] auto-refresh', reason || '');
+    }
+    loadFiles(true);
+  }, [loadFiles]);
+
   
 
   // Pull-to-refresh state
