@@ -60,8 +60,7 @@ export async function POST(request: NextRequest) {
     // Update file status to "paid" and assign agent
     try {
       // Get all active agents for assignment
-      const agentsSnapshot = await adminDb.collection('users')
-        .where('role', '==', 'agent')
+      const agentsSnapshot = await adminDb.collection('agents')
         .where('isActive', '==', true)
         .get();
 
