@@ -58,6 +58,7 @@ export default function UploadPage() {
     "image/jpg", 
     "image/png",
     "image/gif",
+    "image/webp",
     "image/bmp",
     "image/tiff",
     "application/msword",
@@ -69,7 +70,8 @@ export default function UploadPage() {
     "application/vnd.ms-powerpoint",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/zip",
-    "application/x-rar-compressed"
+    "application/x-rar-compressed",
+    "image/svg+xml"
   ];
 
   const formatFileSize = useCallback((bytes: number) => {

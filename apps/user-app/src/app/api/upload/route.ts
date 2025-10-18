@@ -37,12 +37,22 @@ const validateFileType = (mimeType: string): boolean => {
   const allowedTypes = [
     'application/pdf',
     'image/jpeg',
+    'image/jpg',
     'image/png',
     'image/gif',
     'image/webp',
+    'image/bmp',
+    'image/tiff',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'text/plain',
+    'application/rtf',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/zip',
+    'application/x-rar-compressed',
     'image/svg+xml'
   ];
   return allowedTypes.includes(mimeType);
@@ -60,6 +70,11 @@ const inferMimeFromFilename = (filename: string): string => {
       return 'image/gif';
     case 'webp':
       return 'image/webp';
+    case 'bmp':
+      return 'image/bmp';
+    case 'tiff':
+    case 'tif':
+      return 'image/tiff';
     case 'pdf':
       return 'application/pdf';
     case 'doc':
@@ -68,6 +83,20 @@ const inferMimeFromFilename = (filename: string): string => {
       return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     case 'txt':
       return 'text/plain';
+    case 'rtf':
+      return 'application/rtf';
+    case 'xls':
+      return 'application/vnd.ms-excel';
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'ppt':
+      return 'application/vnd.ms-powerpoint';
+    case 'pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case 'zip':
+      return 'application/zip';
+    case 'rar':
+      return 'application/x-rar-compressed';
     case 'svg':
       return 'image/svg+xml';
     default:
@@ -76,7 +105,7 @@ const inferMimeFromFilename = (filename: string): string => {
 };
 
 const validateFileSize = (size: number): boolean => {
-  const maxSize = 10 * 1024 * 1024; // 10MB for database storage (reduced from 20MB)
+  const maxSize = 20 * 1024 * 1024; // 20MB to match frontend limit
   return size <= maxSize;
 };
 
@@ -130,7 +159,7 @@ export async function POST(request: NextRequest) {
     // Validate file size
     if (!validateFileSize(size)) {
       return NextResponse.json(
-        { success: false, message: 'File size exceeds 10MB limit for database storage' },
+        { success: false, message: 'File size exceeds 20MB limit' },
         { status: 400 }
       );
     }
@@ -140,8 +169,19 @@ export async function POST(request: NextRequest) {
     const filePath = `uploads/${userId}/${uniqueFilename}`;
 
     // Convert file to buffer for database storage
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-    const base64Content = fileBuffer.toString('base64');
+    let fileBuffer: Buffer;
+    let base64Content: string;
+    
+    try {
+      fileBuffer = Buffer.from(await file.arrayBuffer());
+      base64Content = fileBuffer.toString('base64');
+    } catch (bufferError: any) {
+      console.error('Buffer conversion error:', bufferError);
+      return NextResponse.json(
+        { success: false, message: 'Failed to process file data. File may be corrupted.' },
+        { status: 400 }
+      );
+    }
     
     // Create file document in Firestore with file content
     const fileDocumentData: CreateFileData = {
@@ -164,13 +204,21 @@ export async function POST(request: NextRequest) {
       id: fileId,
       ...fileDocumentData,
       // Store file buffer temporarily (should be moved to Firebase Storage)
-      fileBuffer: fileBuffer.toString('base64'), // Temporary - will be migrated
+      fileBuffer: base64Content, // Use the already converted base64 content
       status: 'pending_payment', // Initial status - waiting for payment
       uploadedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
 
-    await fileRef.set(fileDocument);
+    try {
+      await fileRef.set(fileDocument);
+    } catch (firestoreError: any) {
+      console.error('Firestore write error:', firestoreError);
+      return NextResponse.json(
+        { success: false, message: 'Failed to save file to database. Please try again.' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
@@ -188,12 +236,35 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Upload error:', error);
+    console.error('Upload error:', error);
+    
+    // Provide more specific error messages based on error type
+    let errorMessage = 'An error occurred during upload';
+    let statusCode = 500;
+    
+    if (error.code === 'permission-denied') {
+      errorMessage = 'Permission denied. Please check your authentication.';
+      statusCode = 403;
+    } else if (error.code === 'invalid-argument') {
+      errorMessage = 'Invalid file data provided.';
+      statusCode = 400;
+    } else if (error.code === 'resource-exhausted') {
+      errorMessage = 'File too large or server resources exhausted.';
+      statusCode = 413;
+    } else if (error.message) {
+      errorMessage = error.message;
     }
+    
     return NextResponse.json(
-      { success: false, message: 'An error occurred during upload' },
-      { status: 500 }
+      { 
+        success: false, 
+        message: errorMessage,
+        ...(process.env.NODE_ENV === 'development' && { 
+          error: error.message,
+          stack: error.stack 
+        })
+      },
+      { status: statusCode }
     );
   }
 }
