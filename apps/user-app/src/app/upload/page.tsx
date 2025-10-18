@@ -177,6 +177,10 @@ export default function UploadPage() {
     try {
       const uploadPromises = Array.from(files).map(async (file) => {
         // Validate file size
+        if (file.size === 0) {
+          throw new Error(`File "${file.name}" is empty. Please select a valid file.`);
+        }
+        
         if (file.size > MAX_FILE_SIZE) {
           throw new Error(`File "${file.name}" is too large. Maximum size is 20MB.`);
         }

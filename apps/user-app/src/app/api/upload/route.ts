@@ -113,6 +113,12 @@ const generateUniqueFilename = (originalName: string): string => {
   const timestamp = Date.now();
   const randomString = Math.random().toString(36).substring(2, 15);
   const extension = originalName.split('.').pop();
+  
+  // Handle files without extensions
+  if (!extension || extension === originalName) {
+    return `${timestamp}_${randomString}`;
+  }
+  
   return `${timestamp}_${randomString}.${extension}`;
 };
 
@@ -134,6 +140,7 @@ export async function POST(request: NextRequest) {
     const metadata = metadataStr ? JSON.parse(metadataStr) : {};
     const originalName = file.name;
     const size = file.size;
+    
     // Some Android WebViews may omit or misreport the MIME type; fall back to inferring from filename
     const mimeTypeRaw = (file as any).type || '';
     const mimeType = mimeTypeRaw && typeof mimeTypeRaw === 'string' && mimeTypeRaw.trim().length > 0
@@ -151,12 +158,19 @@ export async function POST(request: NextRequest) {
     // Validate file type
     if (!validateFileType(mimeType)) {
       return NextResponse.json(
-        { success: false, message: 'File type not supported' },
+        { success: false, message: `File type not supported: ${mimeType}` },
         { status: 400 }
       );
     }
 
     // Validate file size
+    if (size === 0) {
+      return NextResponse.json(
+        { success: false, message: 'File is empty. Please select a valid file.' },
+        { status: 400 }
+      );
+    }
+    
     if (!validateFileSize(size)) {
       return NextResponse.json(
         { success: false, message: 'File size exceeds 20MB limit' },
@@ -173,7 +187,8 @@ export async function POST(request: NextRequest) {
     let base64Content: string;
     
     try {
-      fileBuffer = Buffer.from(await file.arrayBuffer());
+      const arrayBuffer = await file.arrayBuffer();
+      fileBuffer = Buffer.from(arrayBuffer);
       base64Content = fileBuffer.toString('base64');
     } catch (bufferError: any) {
       console.error('Buffer conversion error:', bufferError);
