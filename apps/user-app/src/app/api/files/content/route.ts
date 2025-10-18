@@ -46,6 +46,20 @@ export async function GET(request: NextRequest) {
     // Convert base64 to buffer for streaming
     const fileBuffer = Buffer.from(fileContent, 'base64');
     
+    // Check if file is too large for browser rendering
+    const MAX_BROWSER_SIZE = 10 * 1024 * 1024; // 10MB
+    if (fileBuffer.length > MAX_BROWSER_SIZE) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: `File is too large (${Math.round(fileBuffer.length / 1024 / 1024)}MB) to preview in browser. Please download to view.`,
+          fileSize: fileBuffer.length,
+          maxSize: MAX_BROWSER_SIZE
+        },
+        { status: 413 }
+      );
+    }
+    
     // Set appropriate headers for file streaming
     const headers = new Headers();
     headers.set('Content-Type', fileData.mimeType || 'application/octet-stream');

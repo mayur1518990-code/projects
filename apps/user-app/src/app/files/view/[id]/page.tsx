@@ -40,14 +40,10 @@ export default function ViewDocumentPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+  const [contentError, setContentError] = useState("");
   const isLoadingRef = useRef(false); // Prevent duplicate requests
   const fileCacheRef = useRef<Map<string, { file: FileData; content: string; timestamp: number }>>(new Map());
-
-  useEffect(() => {
-    if (user && !authLoading && fileId) {
-      loadFile();
-    }
-  }, [user, authLoading, fileId]);
 
   const loadFile = useCallback(async () => {
     if (!user || !fileId || isLoadingRef.current) return;
@@ -83,21 +79,8 @@ export default function ViewDocumentPage() {
 
       setFile(fileResult.file);
 
-      // Decide which content to fetch: agent-completed file (if available) or original upload
-      let contentResponse: Response;
-      if (fileResult.file?.status === 'completed' && fileResult.file?.completedFileId) {
-        contentResponse = await fetch(`/api/files/completed/${fileResult.file.completedFileId}/download?userId=${user.userId}`);
-      } else {
-        contentResponse = await fetch(`/api/files/content?fileId=${fileId}&userId=${user.userId}`);
-      }
-      
-      if (contentResponse.ok) {
-        const blob = await contentResponse.blob();
-        const url = URL.createObjectURL(blob);
-        setFileContent(url);
-      } else {
-        setFileContent(null);
-      }
+      // Load file content with better error handling
+      await loadFileContent(fileResult.file);
 
       // Cache the result
       fileCacheRef.current.set(cacheKey, {
@@ -113,6 +96,56 @@ export default function ViewDocumentPage() {
       isLoadingRef.current = false;
     }
   }, [user, fileId]);
+
+  const loadFileContent = useCallback(async (fileData: FileData) => {
+    try {
+      setContentLoading(true);
+      setContentError("");
+
+      // Check if file is too large for browser rendering (>10MB)
+      const MAX_BROWSER_RENDER_SIZE = 10 * 1024 * 1024; // 10MB
+      if (fileData.size > MAX_BROWSER_RENDER_SIZE) {
+        setContentError(`File is too large (${Math.round(fileData.size / 1024 / 1024)}MB) to preview in browser. Please download to view.`);
+        setFileContent(null);
+        return;
+      }
+
+      // Decide which content to fetch: agent-completed file (if available) or original upload
+      let contentResponse: Response;
+      if (fileData?.status === 'completed' && fileData?.completedFileId) {
+        contentResponse = await fetch(`/api/files/completed/${fileData.completedFileId}/download?userId=${user?.userId}`);
+      } else {
+        contentResponse = await fetch(`/api/files/content?fileId=${fileId}&userId=${user?.userId}`);
+      }
+      
+      if (contentResponse.ok) {
+        const blob = await contentResponse.blob();
+        
+        // Check if blob is too large for browser
+        if (blob.size > MAX_BROWSER_RENDER_SIZE) {
+          setContentError(`File content is too large (${Math.round(blob.size / 1024 / 1024)}MB) to preview in browser. Please download to view.`);
+          setFileContent(null);
+          return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        setFileContent(url);
+      } else {
+        throw new Error(`Failed to load file content: ${contentResponse.status}`);
+      }
+    } catch (error: any) {
+      setContentError(error.message || "Failed to load file content");
+      setFileContent(null);
+    } finally {
+      setContentLoading(false);
+    }
+  }, [user, fileId]);
+
+  useEffect(() => {
+    if (user && !authLoading && fileId) {
+      loadFile();
+    }
+  }, [user, authLoading, fileId, loadFile]);
 
   const formatFileSize = useCallback((bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -161,12 +194,28 @@ export default function ViewDocumentPage() {
 
     if (file.mimeType === "application/pdf") {
       return (
-        <div className="w-full h-64 sm:h-80 md:h-96">
-          <iframe
-            src={fileContent}
-            className="w-full h-full border-0 rounded-lg shadow-lg"
-            title={file.originalName}
-          />
+        <div className="w-full">
+          <div className="bg-gray-100 p-2 rounded-t-lg flex items-center justify-between">
+            <span className="text-sm text-gray-600">PDF Document</span>
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-gray-500">{Math.round(file.size / 1024)} KB</span>
+              <a 
+                href={fileContent} 
+                download={file.originalName}
+                className="text-xs text-blue-600 hover:text-blue-800"
+              >
+                Download
+              </a>
+            </div>
+          </div>
+          <div className="w-full h-96 sm:h-[500px] md:h-[600px] lg:h-[700px]">
+            <iframe
+              src={fileContent}
+              className="w-full h-full border-0 rounded-b-lg shadow-lg"
+              title={file.originalName}
+              onError={() => setContentError("Failed to load PDF preview. Please download to view.")}
+            />
+          </div>
         </div>
       );
     }
@@ -329,7 +378,37 @@ export default function ViewDocumentPage() {
       {/* Document Content */}
       <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 md:py-8">
         <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 md:p-6">
-          {renderFileContent()}
+          {contentLoading && (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-gray-600">Loading document...</span>
+            </div>
+          )}
+          
+          {contentError && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center">
+                <svg className="w-5 h-5 text-yellow-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <div>
+                  <h3 className="text-sm font-medium text-yellow-800">Preview Not Available</h3>
+                  <p className="text-sm text-yellow-700 mt-1">{contentError}</p>
+                </div>
+              </div>
+              <div className="mt-3">
+                <a 
+                  href={fileContent || '#'} 
+                  download={file?.originalName}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Download File
+                </a>
+              </div>
+            </div>
+          )}
+          
+          {!contentLoading && !contentError && renderFileContent()}
         </div>
       </main>
     </div>
