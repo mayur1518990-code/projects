@@ -47,14 +47,23 @@ export async function GET(request: NextRequest) {
     const fileBuffer = Buffer.from(fileContent, 'base64');
     
     // Check if file is too large for browser rendering
-    const MAX_BROWSER_SIZE = 10 * 1024 * 1024; // 10MB
+    // Detect WebView from User-Agent header
+    const userAgent = request.headers.get('user-agent') || '';
+    const isWebView = /(wv|WebView|; wv\))/i.test(userAgent) || 
+                     (!/Chrome\//i.test(userAgent) && /Version\//i.test(userAgent) && /Mobile/i.test(userAgent));
+    
+    const MAX_BROWSER_SIZE = isWebView ? 5 * 1024 * 1024 : 10 * 1024 * 1024; // 5MB for WebView, 10MB for browser
+    
     if (fileBuffer.length > MAX_BROWSER_SIZE) {
+      const sizeMB = Math.round(fileBuffer.length / 1024 / 1024);
+      const limitMB = Math.round(MAX_BROWSER_SIZE / 1024 / 1024);
       return NextResponse.json(
         { 
           success: false, 
-          message: `File is too large (${Math.round(fileBuffer.length / 1024 / 1024)}MB) to preview in browser. Please download to view.`,
+          message: `File is too large (${sizeMB}MB) to preview in ${isWebView ? 'mobile app' : 'browser'}. Maximum size is ${limitMB}MB. Please download to view.`,
           fileSize: fileBuffer.length,
-          maxSize: MAX_BROWSER_SIZE
+          maxSize: MAX_BROWSER_SIZE,
+          isWebView: isWebView
         },
         { status: 413 }
       );

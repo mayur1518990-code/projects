@@ -102,10 +102,17 @@ export default function ViewDocumentPage() {
       setContentLoading(true);
       setContentError("");
 
-      // Check if file is too large for browser rendering (>10MB)
-      const MAX_BROWSER_RENDER_SIZE = 10 * 1024 * 1024; // 10MB
+      // Detect if running in WebView (Android app)
+      const isWebView = /(wv|WebView|; wv\))/i.test(navigator.userAgent) || 
+                       (!/Chrome\//i.test(navigator.userAgent) && /Version\//i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent));
+      
+      // Lower limits for WebView environments (Android apps)
+      const MAX_BROWSER_RENDER_SIZE = isWebView ? 5 * 1024 * 1024 : 10 * 1024 * 1024; // 5MB for WebView, 10MB for browser
+      
       if (fileData.size > MAX_BROWSER_RENDER_SIZE) {
-        setContentError(`File is too large (${Math.round(fileData.size / 1024 / 1024)}MB) to preview in browser. Please download to view.`);
+        const sizeMB = Math.round(fileData.size / 1024 / 1024);
+        const limitMB = Math.round(MAX_BROWSER_RENDER_SIZE / 1024 / 1024);
+        setContentError(`File is too large (${sizeMB}MB) to preview in ${isWebView ? 'mobile app' : 'browser'}. Maximum size is ${limitMB}MB. Please download to view.`);
         setFileContent(null);
         return;
       }
@@ -180,13 +187,23 @@ export default function ViewDocumentPage() {
   const renderFileContent = useCallback(() => {
     if (!file || !fileContent) return null;
 
+    // Detect if running in WebView (Android app)
+    const isWebView = /(wv|WebView|; wv\))/i.test(navigator.userAgent) || 
+                     (!/Chrome\//i.test(navigator.userAgent) && /Version\//i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent));
+
     if (file.mimeType.includes("image")) {
       return (
         <div className="flex justify-center">
           <img 
             src={fileContent} 
             alt={file.originalName}
-            className="max-w-full max-h-64 sm:max-h-80 md:max-h-96 object-contain rounded-lg shadow-lg"
+            className={`max-w-full object-contain rounded-lg shadow-lg ${
+              isWebView 
+                ? 'max-h-48 sm:max-h-64' // Smaller height for WebView
+                : 'max-h-64 sm:max-h-80 md:max-h-96'
+            }`}
+            onError={() => setContentError("Failed to load image. Please download to view.")}
+            loading="lazy"
           />
         </div>
       );
@@ -208,13 +225,36 @@ export default function ViewDocumentPage() {
               </a>
             </div>
           </div>
-          <div className="w-full h-96 sm:h-[500px] md:h-[600px] lg:h-[700px]">
-            <iframe
-              src={fileContent}
-              className="w-full h-full border-0 rounded-b-lg shadow-lg"
-              title={file.originalName}
-              onError={() => setContentError("Failed to load PDF preview. Please download to view.")}
-            />
+          <div className={`w-full ${
+            isWebView 
+              ? 'h-64 sm:h-80' // Smaller height for WebView
+              : 'h-96 sm:h-[500px] md:h-[600px] lg:h-[700px]'
+          }`}>
+            {isWebView ? (
+              // For WebView, use a more compatible approach
+              <div className="w-full h-full border rounded-b-lg shadow-lg bg-gray-50 flex flex-col items-center justify-center">
+                <div className="text-center p-4">
+                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                  </svg>
+                  <p className="text-sm text-gray-600 mb-3">PDF Preview not available in mobile app</p>
+                  <a 
+                    href={fileContent} 
+                    download={file.originalName}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    Download PDF
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <iframe
+                src={fileContent}
+                className="w-full h-full border-0 rounded-b-lg shadow-lg"
+                title={file.originalName}
+                onError={() => setContentError("Failed to load PDF preview. Please download to view.")}
+              />
+            )}
           </div>
         </div>
       );
@@ -394,16 +434,30 @@ export default function ViewDocumentPage() {
                 <div>
                   <h3 className="text-sm font-medium text-yellow-800">Preview Not Available</h3>
                   <p className="text-sm text-yellow-700 mt-1">{contentError}</p>
+                  {/(wv|WebView|; wv\))/i.test(navigator.userAgent) && (
+                    <p className="text-xs text-yellow-600 mt-1">
+                      💡 Tip: Some files work better in the web browser version of this app.
+                    </p>
+                  )}
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex flex-col sm:flex-row gap-2">
                 <a 
                   href={fileContent || '#'} 
                   download={file?.originalName}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors text-center"
                 >
                   Download File
                 </a>
+                {/(wv|WebView|; wv\))/i.test(navigator.userAgent) && (
+                  <a 
+                    href={window.location.href.replace(/^https?:\/\/[^\/]+/, 'https://your-website-domain.com')}
+                    target="_blank"
+                    className="bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-green-700 transition-colors text-center"
+                  >
+                    Open in Browser
+                  </a>
+                )}
               </div>
             </div>
           )}
