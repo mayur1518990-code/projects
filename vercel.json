@@ -1,0 +1,15 @@
+{
+  "buildCommand": "npm ci && npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": "apps/user-app/.next",
+  "framework": "nextjs",
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
+
