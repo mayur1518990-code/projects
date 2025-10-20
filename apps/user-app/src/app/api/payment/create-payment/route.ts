@@ -42,19 +42,21 @@ export async function POST(request: NextRequest) {
     };
 
 
-    const paymentRef = adminDb.collection('payments').doc();
-    const paymentId = paymentRef.id;
+    let paymentId;
+    const paymentRef = await adminDb.collection('payments').where('fileId', '==', fileId).limit(1).get();
 
-    const paymentDocument = {
-      id: paymentId,
-      ...paymentData,
-    };
-
-    
-    try {
-      await paymentRef.set(paymentDocument);
-    } catch (firestoreError) {
-      throw firestoreError;
+    if (!paymentRef.empty) {
+      const paymentDoc = paymentRef.docs[0];
+      paymentId = paymentDoc.id;
+      await paymentDoc.ref.update(paymentData);
+    } else {
+      const newPaymentRef = adminDb.collection('payments').doc();
+      paymentId = newPaymentRef.id;
+      const paymentDocument = {
+        id: paymentId,
+        ...paymentData,
+      };
+      await newPaymentRef.set(paymentDocument);
     }
 
     // Update file status to "paid" and assign agent
