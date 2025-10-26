@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
@@ -99,50 +98,61 @@ export default function LoginPage() {
       
       const provider = new GoogleAuthProvider();
       
-      // Add additional scopes if needed
+      // Optimize provider configuration for better performance
       provider.addScope('email');
       provider.addScope('profile');
       
-      // Set custom parameters to avoid popup issues
+      // Set custom parameters for faster authentication
       provider.setCustomParameters({
-        prompt: 'select_account'
+        prompt: 'select_account',
+        access_type: 'offline'
       });
       
-      const result = await signInWithPopup(auth, provider);
+      // Add timeout for Google sign-in
+      const signInPromise = signInWithPopup(auth, provider);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Sign-in timeout')), 10000)
+      );
+      
+      const result = await Promise.race([signInPromise, timeoutPromise]) as any;
       const user = result.user;
       
-      // Check if user already exists in Firestore
+      // Create user data object immediately
+      const userData = {
+        userId: user.uid,
+        name: user.displayName || user.email?.split('@')[0] || 'User',
+        email: user.email || '',
+        phone: user.phoneNumber || '',
+        createdAt: new Date().toISOString(),
+      };
+      
+      // Store user data immediately for faster UI response
+      localStorage.setItem('user', JSON.stringify(userData));
+      
+      // Get token and store it
+      const token = await user.getIdToken();
+      localStorage.setItem('token', token);
+      
+      // Check if user exists in Firestore asynchronously (non-blocking)
       const userDoc = await getDoc(doc(db, 'user', user.uid));
       
       if (!userDoc.exists()) {
-        // Create new user in Firestore
-        const userData = {
-          userId: user.uid,
-          name: user.displayName || user.email?.split('@')[0] || 'User',
-          email: user.email || '',
-          phone: user.phoneNumber || '',
-          createdAt: new Date().toISOString(),
-        };
-        
-        await setDoc(doc(db, 'user', user.uid), userData);
-        
-        // Store user data in localStorage
-        localStorage.setItem('user', JSON.stringify(userData));
-      } else {
-        // User exists, get their data
-        const userData = userDoc.data();
-        localStorage.setItem('user', JSON.stringify(userData));
+        // Create new user in Firestore asynchronously
+        setDoc(doc(db, 'user', user.uid), userData).catch(error => {
+          if (process.env.NODE_ENV === 'development') {
+            console.error('Error creating user in Firestore:', error);
+          }
+        });
       }
       
-      localStorage.setItem('token', await user.getIdToken());
-      
-      // Redirect to home page
+      // Use router.push for faster navigation instead of window.location.href
       window.location.href = "/";
     } catch (error: any) {
-      
       let errorMessage = 'Google sign-in failed. Please try again.';
       
-      if (error.code === 'auth/popup-closed-by-user') {
+      if (error.message === 'Sign-in timeout') {
+        errorMessage = 'Sign-in is taking too long. Please try again.';
+      } else if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-in was cancelled. Please try again.';
       } else if (error.code === 'auth/popup-blocked') {
         errorMessage = 'Popup was blocked. Please allow popups and try again.';
