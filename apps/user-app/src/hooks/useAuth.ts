@@ -67,14 +67,14 @@ export function useAuth() {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        // Reduced timeout to 2 seconds for faster UX
+        // Reduced timeout to 1 second for much faster UX
         timeoutRef.current = setTimeout(() => {
           if (process.env.NODE_ENV === 'development') {
             console.warn('Auth initialization timeout - proceeding without user');
           }
           setLoading(false);
           setInitialized(true);
-        }, 2000);
+        }, 1000);
 
         // Check localStorage first for immediate response
         const storedUser = getUserFromStorage();

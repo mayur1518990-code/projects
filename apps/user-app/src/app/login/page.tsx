@@ -98,26 +98,25 @@ export default function LoginPage() {
       
       const provider = new GoogleAuthProvider();
       
-      // Optimize provider configuration for better performance
-      provider.addScope('email');
-      provider.addScope('profile');
+      // No additional scopes - use defaults for maximum speed
+      // provider.addScope('email'); // Removed for speed
       
-      // Set custom parameters for faster authentication
+      // Minimal parameters for fastest authentication
       provider.setCustomParameters({
         prompt: 'select_account',
-        access_type: 'offline'
+        hd: '' // Disable domain hint for faster processing
       });
       
-      // Add timeout for Google sign-in
+      // Ultra-fast timeout - 3 seconds max
       const signInPromise = signInWithPopup(auth, provider);
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Sign-in timeout')), 10000)
+        setTimeout(() => reject(new Error('Sign-in timeout')), 3000)
       );
       
       const result = await Promise.race([signInPromise, timeoutPromise]) as any;
       const user = result.user;
       
-      // Create user data object immediately
+      // Create minimal user data immediately
       const userData = {
         userId: user.uid,
         name: user.displayName || user.email?.split('@')[0] || 'User',
@@ -126,27 +125,31 @@ export default function LoginPage() {
         createdAt: new Date().toISOString(),
       };
       
-      // Store user data immediately for faster UI response
+      // Store immediately for instant UI response
       localStorage.setItem('user', JSON.stringify(userData));
       
-      // Get token and store it
-      const token = await user.getIdToken();
-      localStorage.setItem('token', token);
+      // Get token asynchronously to avoid blocking
+      user.getIdToken().then((token: string) => {
+        localStorage.setItem('token', token);
+      }).catch(() => {
+        // Silent fail - user is still logged in
+      });
       
-      // Check if user exists in Firestore asynchronously (non-blocking)
-      const userDoc = await getDoc(doc(db, 'user', user.uid));
-      
-      if (!userDoc.exists()) {
-        // Create new user in Firestore asynchronously
-        setDoc(doc(db, 'user', user.uid), userData).catch(error => {
-          if (process.env.NODE_ENV === 'development') {
-            console.error('Error creating user in Firestore:', error);
-          }
-        });
-      }
-      
-      // Use router.push for faster navigation instead of window.location.href
+      // Redirect immediately - no waiting for anything
       window.location.href = "/";
+      
+      // Handle Firestore operations in background (completely non-blocking)
+      setTimeout(async () => {
+        try {
+          const userDoc = await getDoc(doc(db, 'user', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'user', user.uid), userData);
+          }
+        } catch (error) {
+          // Silent fail - user is already logged in
+        }
+      }, 100);
+      
     } catch (error: any) {
       let errorMessage = 'Google sign-in failed. Please try again.';
       
