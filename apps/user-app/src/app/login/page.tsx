@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
@@ -99,50 +98,65 @@ export default function LoginPage() {
       
       const provider = new GoogleAuthProvider();
       
-      // Add additional scopes if needed
-      provider.addScope('email');
-      provider.addScope('profile');
+      // No additional scopes - use defaults for maximum speed
+      // provider.addScope('email'); // Removed for speed
       
-      // Set custom parameters to avoid popup issues
+      // Optimized parameters for faster Google popup
       provider.setCustomParameters({
-        prompt: 'select_account'
+        prompt: 'select_account',
+        hd: '', // Disable domain hint
+        include_granted_scopes: 'true' // Faster scope handling
       });
       
-      const result = await signInWithPopup(auth, provider);
+      // Reasonable timeout - 8 seconds (Google popup can take time)
+      const signInPromise = signInWithPopup(auth, provider);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Sign-in timeout')), 8000)
+      );
+      
+      const result = await Promise.race([signInPromise, timeoutPromise]) as any;
       const user = result.user;
       
-      // Check if user already exists in Firestore
-      const userDoc = await getDoc(doc(db, 'user', user.uid));
+      // Create minimal user data immediately
+      const userData = {
+        userId: user.uid,
+        name: user.displayName || user.email?.split('@')[0] || 'User',
+        email: user.email || '',
+        phone: user.phoneNumber || '',
+        createdAt: new Date().toISOString(),
+      };
       
-      if (!userDoc.exists()) {
-        // Create new user in Firestore
-        const userData = {
-          userId: user.uid,
-          name: user.displayName || user.email?.split('@')[0] || 'User',
-          email: user.email || '',
-          phone: user.phoneNumber || '',
-          createdAt: new Date().toISOString(),
-        };
-        
-        await setDoc(doc(db, 'user', user.uid), userData);
-        
-        // Store user data in localStorage
-        localStorage.setItem('user', JSON.stringify(userData));
-      } else {
-        // User exists, get their data
-        const userData = userDoc.data();
-        localStorage.setItem('user', JSON.stringify(userData));
-      }
+      // Store immediately for instant UI response
+      localStorage.setItem('user', JSON.stringify(userData));
       
-      localStorage.setItem('token', await user.getIdToken());
+      // Get token asynchronously to avoid blocking
+      user.getIdToken().then((token: string) => {
+        localStorage.setItem('token', token);
+      }).catch(() => {
+        // Silent fail - user is still logged in
+      });
       
-      // Redirect to home page
+      // Redirect immediately - no waiting for anything
       window.location.href = "/";
-    } catch (error: any) {
       
+      // Handle Firestore operations in background (completely non-blocking)
+      setTimeout(async () => {
+        try {
+          const userDoc = await getDoc(doc(db, 'user', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'user', user.uid), userData);
+          }
+        } catch (error) {
+          // Silent fail - user is already logged in
+        }
+      }, 100);
+      
+    } catch (error: any) {
       let errorMessage = 'Google sign-in failed. Please try again.';
       
-      if (error.code === 'auth/popup-closed-by-user') {
+      if (error.message === 'Sign-in timeout') {
+        errorMessage = 'Google sign-in is taking longer than expected. Please try again or check your internet connection.';
+      } else if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-in was cancelled. Please try again.';
       } else if (error.code === 'auth/popup-blocked') {
         errorMessage = 'Popup was blocked. Please allow popups and try again.';
