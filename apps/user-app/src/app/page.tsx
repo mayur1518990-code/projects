@@ -148,26 +148,55 @@ export default function Home() {
       <section className="bg-gray-900 text-white py-12 sm:py-16 md:py-20">
         <div className="container mx-auto px-3 sm:px-4">
           <div className="max-w-4xl mx-auto text-center">
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">
-              Ready to Get Started?
-            </h2>
-            <p className="text-base sm:text-lg md:text-xl text-gray-300 mb-6 sm:mb-8 px-2 sm:px-0">
-              Join thousands of users who trust DocUpload for their document processing needs.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-2 sm:px-0">
-              <Link
-                href="/signup"
-                className="bg-blue-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
-              >
-                Create Account
-              </Link>
-              <Link
-                href="/upload"
-                className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto"
-              >
-                Try Now
-              </Link>
-            </div>
+            {user ? (
+              // Show different content when user is logged in
+              <>
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">
+                  Welcome back, {user.name}!
+                </h2>
+                <p className="text-base sm:text-lg md:text-xl text-gray-300 mb-6 sm:mb-8 px-2 sm:px-0">
+                  Ready to upload and process your documents? Your files are waiting.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-2 sm:px-0">
+                  <Link
+                    href="/upload"
+                    className="bg-blue-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
+                  >
+                    Upload Files
+                  </Link>
+                  <Link
+                    href="/files"
+                    className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto"
+                  >
+                    View My Files
+                  </Link>
+                </div>
+              </>
+            ) : (
+              // Show signup content when user is not logged in
+              <>
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">
+                  Ready to Get Started?
+                </h2>
+                <p className="text-base sm:text-lg md:text-xl text-gray-300 mb-6 sm:mb-8 px-2 sm:px-0">
+                  Join thousands of users who trust DocUpload for their document processing needs.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-2 sm:px-0">
+                  <Link
+                    href="/signup"
+                    className="bg-blue-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
+                  >
+                    Create Account
+                  </Link>
+                  <Link
+                    href="/upload"
+                    className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto"
+                  >
+                    Try Now
+                  </Link>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </section>
