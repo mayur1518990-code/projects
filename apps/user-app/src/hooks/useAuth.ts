@@ -20,8 +20,8 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout>();
-  const unsubscribeRef = useRef<(() => void) | undefined>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const unsubscribeRef = useRef<(() => void) | undefined>(undefined);
 
   // Optimized function to get user data from localStorage with caching
   const getUserFromStorage = useCallback(() => {
