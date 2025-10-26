@@ -1,7 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage, FirebaseStorage, connectStorageEmulator } from 'firebase/storage';
+import { getAuth, Auth } from 'firebase/auth';
+import { getFirestore, Firestore } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -19,51 +19,17 @@ if (!isConfigValid) {
   console.warn('Firebase configuration is incomplete. Some features may not work properly.');
 }
 
-// Initialize Firebase with error handling and performance optimizations
+// Initialize Firebase with error handling
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
 
 try {
-  // Use existing app if available to prevent multiple initializations
-  const existingApps = getApps();
-  if (existingApps.length > 0) {
-    app = existingApps[0];
-  } else {
-    app = initializeApp(firebaseConfig);
-  }
-  
-  // Initialize services with performance optimizations
+  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
   auth = getAuth(app);
   db = getFirestore(app);
   storage = getStorage(app);
-  
-  // Configure Firebase for better performance
-  if (typeof window !== 'undefined') {
-    // Enable persistence for better offline experience
-    import('firebase/auth').then(({ setPersistence, browserLocalPersistence }) => {
-      setPersistence(auth, browserLocalPersistence).catch(error => {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Failed to set auth persistence:', error);
-        }
-      });
-    });
-    
-    // Connect to emulators in development (simplified)
-    if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
-      try {
-        connectAuthEmulator(auth, 'http://localhost:9099');
-        connectFirestoreEmulator(db, 'localhost', 8080);
-        connectStorageEmulator(storage, 'localhost', 9199);
-      } catch (error) {
-        // Emulators already connected or not available
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Firebase emulators not available or already connected');
-        }
-      }
-    }
-  }
 } catch (error) {
   console.error('Firebase initialization failed:', error);
   throw error;

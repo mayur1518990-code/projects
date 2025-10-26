@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
@@ -98,64 +99,50 @@ export default function LoginPage() {
       
       const provider = new GoogleAuthProvider();
       
-      // No additional scopes - use defaults for maximum speed
-      // provider.addScope('email'); // Removed for speed
+      // Add additional scopes if needed
+      provider.addScope('email');
+      provider.addScope('profile');
       
-      // Minimal parameters for fastest authentication
+      // Set custom parameters to avoid popup issues
       provider.setCustomParameters({
-        prompt: 'select_account',
-        hd: '' // Disable domain hint for faster processing
+        prompt: 'select_account'
       });
       
-      // Ultra-fast timeout - 3 seconds max
-      const signInPromise = signInWithPopup(auth, provider);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Sign-in timeout')), 3000)
-      );
-      
-      const result = await Promise.race([signInPromise, timeoutPromise]) as any;
+      const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
-      // Create minimal user data immediately
-      const userData = {
-        userId: user.uid,
-        name: user.displayName || user.email?.split('@')[0] || 'User',
-        email: user.email || '',
-        phone: user.phoneNumber || '',
-        createdAt: new Date().toISOString(),
-      };
+      // Check if user already exists in Firestore
+      const userDoc = await getDoc(doc(db, 'user', user.uid));
       
-      // Store immediately for instant UI response
-      localStorage.setItem('user', JSON.stringify(userData));
+      if (!userDoc.exists()) {
+        // Create new user in Firestore
+        const userData = {
+          userId: user.uid,
+          name: user.displayName || user.email?.split('@')[0] || 'User',
+          email: user.email || '',
+          phone: user.phoneNumber || '',
+          createdAt: new Date().toISOString(),
+        };
+        
+        await setDoc(doc(db, 'user', user.uid), userData);
+        
+        // Store user data in localStorage
+        localStorage.setItem('user', JSON.stringify(userData));
+      } else {
+        // User exists, get their data
+        const userData = userDoc.data();
+        localStorage.setItem('user', JSON.stringify(userData));
+      }
       
-      // Get token asynchronously to avoid blocking
-      user.getIdToken().then((token: string) => {
-        localStorage.setItem('token', token);
-      }).catch(() => {
-        // Silent fail - user is still logged in
-      });
+      localStorage.setItem('token', await user.getIdToken());
       
-      // Redirect immediately - no waiting for anything
+      // Redirect to home page
       window.location.href = "/";
-      
-      // Handle Firestore operations in background (completely non-blocking)
-      setTimeout(async () => {
-        try {
-          const userDoc = await getDoc(doc(db, 'user', user.uid));
-          if (!userDoc.exists()) {
-            await setDoc(doc(db, 'user', user.uid), userData);
-          }
-        } catch (error) {
-          // Silent fail - user is already logged in
-        }
-      }, 100);
-      
     } catch (error: any) {
+      
       let errorMessage = 'Google sign-in failed. Please try again.';
       
-      if (error.message === 'Sign-in timeout') {
-        errorMessage = 'Sign-in is taking too long. Please try again.';
-      } else if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-in was cancelled. Please try again.';
       } else if (error.code === 'auth/popup-blocked') {
         errorMessage = 'Popup was blocked. Please allow popups and try again.';
