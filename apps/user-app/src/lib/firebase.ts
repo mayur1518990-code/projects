@@ -50,20 +50,17 @@ try {
       });
     });
     
-    // Connect to emulators in development
+    // Connect to emulators in development (simplified)
     if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
       try {
-        if (!auth._delegate._config?.emulator) {
-          connectAuthEmulator(auth, 'http://localhost:9099');
-        }
-        if (!db._delegate._settings?.host?.includes('localhost')) {
-          connectFirestoreEmulator(db, 'localhost', 8080);
-        }
-        if (!storage._delegate._host?.includes('localhost')) {
-          connectStorageEmulator(storage, 'localhost', 9199);
-        }
+        connectAuthEmulator(auth, 'http://localhost:9099');
+        connectFirestoreEmulator(db, 'localhost', 8080);
+        connectStorageEmulator(storage, 'localhost', 9199);
       } catch (error) {
         // Emulators already connected or not available
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Firebase emulators not available or already connected');
+        }
       }
     }
   }
