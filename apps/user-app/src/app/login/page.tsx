@@ -119,13 +119,8 @@ export default function LoginPage() {
         include_granted_scopes: 'true' // Faster scope handling
       });
       
-      // Reasonable timeout - 8 seconds (Google popup can take time)
-      const signInPromise = signInWithPopup(auth, provider);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Sign-in timeout')), 8000)
-      );
-      
-      const result = await Promise.race([signInPromise, timeoutPromise]) as any;
+      // No timeout - let Google sign-in complete naturally
+      const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
       // Create minimal user data immediately
@@ -165,9 +160,7 @@ export default function LoginPage() {
     } catch (error: any) {
       let errorMessage = 'Google sign-in failed. Please try again.';
       
-      if (error.message === 'Sign-in timeout') {
-        errorMessage = 'Sign-in is taking too long. Please try again.';
-      } else if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-in was cancelled. Please try again.';
       } else if (error.code === 'auth/popup-blocked') {
         errorMessage = 'Popup was blocked. Please allow popups and try again.';
