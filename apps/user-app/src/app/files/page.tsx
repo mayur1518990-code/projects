@@ -61,29 +61,48 @@ export default function FilesPage() {
   const filesDataRef = useRef<FileData[]>([]); // Cache files data
   const lastUserIdRef = useRef<string | null>(null); // Track last user ID
   const [contactNumbers, setContactNumbers] = useState<string[]>([]); // Contact numbers for processing files
+  const abortControllerRef = useRef<AbortController | null>(null); // For request cancellation
+
+  // Memoize localStorage reads to prevent blocking on every render
+  const localStorageCache = useMemo(() => {
+    try {
+      const paidIds = localStorage.getItem('paidFileIds');
+      const deletedIds = localStorage.getItem('deletedFileIds');
+      const lastDeleteTime = localStorage.getItem('lastFileDeleteTime');
+      
+      return {
+        paidIds: new Set((paidIds ? JSON.parse(paidIds) : []) as string[]),
+        deletedIds: new Set((deletedIds ? JSON.parse(deletedIds) : []) as string[]),
+        lastDeleteTime: lastDeleteTime ? parseInt(lastDeleteTime, 10) : 0
+      };
+    } catch {
+      return {
+        paidIds: new Set<string>(),
+        deletedIds: new Set<string>(),
+        lastDeleteTime: 0
+      };
+    }
+  }, [files.length]); // Only recalculate when files length changes
 
   // Smart loading function that only fetches when needed
   const loadFiles = useCallback(async (forceRefresh = false) => {
     if (!user || isLoadingFilesRef.current) return; // Prevent duplicate requests
     
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
     const now = Date.now();
     
     // Check if there was a recent delete - if so, force refresh to bypass cache
     let shouldForceRefresh = forceRefresh;
-    try {
-      const lastDeleteTime = localStorage.getItem('lastFileDeleteTime');
-      if (lastDeleteTime) {
-        const deleteTimestamp = parseInt(lastDeleteTime, 10);
-        // Force refresh if delete happened in the last 30 seconds (reduced for performance)
-        if (now - deleteTimestamp < 30000) {
-          shouldForceRefresh = true;
-          // Also clear any cached data to prevent showing stale data
-          filesDataRef.current = [];
-          lastFetchTimeRef.current = 0;
-        }
-      }
-    } catch (e) {
-      // Ignore localStorage errors
+    const timeSinceDelete = now - localStorageCache.lastDeleteTime;
+    if (timeSinceDelete < 30000) {
+      shouldForceRefresh = true;
+      // Also clear any cached data to prevent showing stale data
+      filesDataRef.current = [];
+      lastFetchTimeRef.current = 0;
     }
     
     // Simple cache - only use cached data if not forcing refresh and data exists
@@ -99,9 +118,10 @@ export default function FilesPage() {
       setIsLoading(true);
       setError("");
       
-      // Add timeout to prevent hanging
+      // Create new abort controller for this request
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      abortControllerRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // Reduced to 8s for faster response
       
       // Add cache-busting parameter if force refresh to bypass any caching layers
       const cacheBuster = shouldForceRefresh ? `&_t=${Date.now()}` : '';
@@ -112,9 +132,9 @@ export default function FilesPage() {
           signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache, no-store, must-revalidate', // Always prevent browser caching
-            'Pragma': 'no-cache', // HTTP 1.0 compatibility
-            'Expires': '0', // Proxies
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
           },
         });
       } catch (fetchError) {
@@ -134,19 +154,9 @@ export default function FilesPage() {
         throw new Error(result.message || 'Failed to load files');
       }
       
-      // Load locally-recorded paid IDs to temporarily override server lag
-      let localPaidIds: Set<string> = new Set();
-      try {
-        const raw = localStorage.getItem('paidFileIds');
-        localPaidIds = new Set((raw ? JSON.parse(raw) : []) as string[]);
-      } catch {}
-
-      // Load locally-tracked deleted IDs to filter out ghost entries
-      let localDeletedIds: Set<string> = new Set();
-      try {
-        const raw = localStorage.getItem('deletedFileIds');
-        localDeletedIds = new Set((raw ? JSON.parse(raw) : []) as string[]);
-      } catch {}
+      // Use cached localStorage values instead of reading again
+      const localPaidIds = localStorageCache.paidIds;
+      const localDeletedIds = localStorageCache.deletedIds;
 
       // Transform the data to match our interface
       const transformedFiles: FileData[] = result.files
@@ -262,8 +272,9 @@ export default function FilesPage() {
     } finally {
       setIsLoading(false);
       isLoadingFilesRef.current = false;
+      abortControllerRef.current = null;
     }
-  }, [user]);
+  }, [user, localStorageCache]);
 
   // Single useEffect to load files when user is available
   useEffect(() => {
@@ -273,26 +284,14 @@ export default function FilesPage() {
       lastUserIdRef.current = user.userId;
       
       // Check if there was a recent deletion - force refresh if yes
-      let shouldForceRefresh = false;
-      try {
-        const lastDeleteTime = localStorage.getItem('lastFileDeleteTime');
-        if (lastDeleteTime) {
-          const deleteTimestamp = parseInt(lastDeleteTime, 10);
-          const timeSinceDelete = Date.now() - deleteTimestamp;
-          // Force refresh only if delete happened in the last 30 seconds (reduced for performance)
-          if (timeSinceDelete < 30000) {
-            shouldForceRefresh = true;
-          }
-        }
-      } catch (e) {
-        // Ignore localStorage errors
-      }
+      const timeSinceDelete = Date.now() - localStorageCache.lastDeleteTime;
+      const shouldForceRefresh = timeSinceDelete < 30000;
       
       if (isNewUser || shouldForceRefresh) {
         loadFiles(shouldForceRefresh);
       }
     }
-  }, [user, authLoading]); // Removed loadFiles from dependencies to prevent re-runs
+  }, [user, authLoading, loadFiles, localStorageCache.lastDeleteTime]);
 
   // Add timeout for auth loading to prevent infinite loading
   useEffect(() => {
@@ -307,8 +306,12 @@ export default function FilesPage() {
 
   // No auto-refresh - only fetch on page load or manual refresh
 
-  // Fetch contact numbers on mount
+  // Fetch contact numbers on mount (only once)
+  const contactFetchedRef = useRef(false);
   useEffect(() => {
+    if (contactFetchedRef.current) return;
+    contactFetchedRef.current = true;
+
     const fetchContactNumbers = async () => {
       try {
         const response = await fetch('/api/contact-numbers');
@@ -328,11 +331,30 @@ export default function FilesPage() {
 
   // Using shared utility functions from fileUtils
 
+  // Helper to safely format dates (memoized per file to avoid recalculation)
+  const formatDateSafe = useCallback((dateString: string | undefined): string => {
+    if (!dateString) return '—';
+    try {
+      const d = new Date(dateString as any);
+      return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+    } catch {
+      return '—';
+    }
+  }, []);
+
   // Memoize filtered files to prevent unnecessary recalculations
   const filteredFiles = useMemo(() => 
     files.filter(file => filter === "all" || file.status === filter),
     [files, filter]
   );
+
+  // Memoize stats to prevent recalculation on every render
+  const fileStats = useMemo(() => ({
+    total: files.length,
+    pendingPayment: files.filter(f => f.status === "pending_payment").length,
+    paid: files.filter(f => f.status === "paid" || f.status === "processing" || f.status === "completed").length,
+    completed: files.filter(f => f.status === "completed").length
+  }), [files]);
 
   const handlePaymentSuccess = useCallback((fileId: string) => {
     // Update local state immediately for better UX
@@ -347,15 +369,17 @@ export default function FilesPage() {
       file.id === fileId ? { ...file, status: "paid" as const } : file
     );
 
-    // Persist paid status locally to survive refresh
-    try {
-      const key = 'paidFileIds';
-      const existingRaw = localStorage.getItem(key);
-      const existing: string[] = existingRaw ? JSON.parse(existingRaw) : [];
-      if (!existing.includes(fileId)) {
-        localStorage.setItem(key, JSON.stringify([...existing, fileId]));
-      }
-    } catch {}
+    // Persist paid status locally to survive refresh (async to not block UI)
+    requestIdleCallback(() => {
+      try {
+        const key = 'paidFileIds';
+        const existingRaw = localStorage.getItem(key);
+        const existing: string[] = existingRaw ? JSON.parse(existingRaw) : [];
+        if (!existing.includes(fileId)) {
+          localStorage.setItem(key, JSON.stringify([...existing, fileId]));
+        }
+      } catch {}
+    }, { timeout: 500 });
 
     // Force refresh from server to ensure payment status is persisted
     setTimeout(() => {
@@ -413,10 +437,15 @@ export default function FilesPage() {
   // Users can manually refresh by pull-to-refresh or reload button
 
   const handleQRGenerate = useCallback((fileId: string) => {
+    // Use functional update to avoid dependencies
     setFiles(prev =>
       prev.map(file =>
         file.id === fileId ? { ...file, qrCode: "generated" } : file
       )
+    );
+    // Also update cache
+    filesDataRef.current = filesDataRef.current.map(file =>
+      file.id === fileId ? { ...file, qrCode: "generated" } : file
     );
   }, []);
 
@@ -459,30 +488,32 @@ export default function FilesPage() {
         throw new Error(result.message || 'Failed to delete file');
       }
       
-      // Remove from localStorage overrides
-      try {
-        const key = 'paidFileIds';
-        const raw = localStorage.getItem(key);
-        const existing: string[] = raw ? JSON.parse(raw) : [];
-        if (existing.includes(fileId)) {
-          localStorage.setItem(key, JSON.stringify(existing.filter(id => id !== fileId)));
-        }
-      } catch {}
-      
-      // Track deleted file ID to prevent it from showing up again
-      try {
-        const deletedKey = 'deletedFileIds';
-        const deletedRaw = localStorage.getItem(deletedKey);
-        const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
-        if (!deletedIds.includes(fileId)) {
-          localStorage.setItem(deletedKey, JSON.stringify([...deletedIds, fileId]));
-        }
-      } catch {}
-      
-      // Mark deletion timestamp to force cache bypass on next load
-      try {
-        localStorage.setItem('lastFileDeleteTime', Date.now().toString());
-      } catch {}
+      // Remove from localStorage overrides (async to not block UI)
+      requestIdleCallback(() => {
+        try {
+          const key = 'paidFileIds';
+          const raw = localStorage.getItem(key);
+          const existing: string[] = raw ? JSON.parse(raw) : [];
+          if (existing.includes(fileId)) {
+            localStorage.setItem(key, JSON.stringify(existing.filter(id => id !== fileId)));
+          }
+        } catch {}
+        
+        // Track deleted file ID to prevent it from showing up again
+        try {
+          const deletedKey = 'deletedFileIds';
+          const deletedRaw = localStorage.getItem(deletedKey);
+          const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+          if (!deletedIds.includes(fileId)) {
+            localStorage.setItem(deletedKey, JSON.stringify([...deletedIds, fileId]));
+          }
+        } catch {}
+        
+        // Mark deletion timestamp to force cache bypass on next load
+        try {
+          localStorage.setItem('lastFileDeleteTime', Date.now().toString());
+        } catch {}
+      }, { timeout: 500 });
       
       // Clear cache timestamp to force fresh fetch next time
       lastFetchTimeRef.current = 0;
@@ -721,13 +752,9 @@ export default function FilesPage() {
                             </p>
                             {file.status === "processing" && (
                               <div className="text-sm flex flex-wrap items-center gap-x-2">
-                                {file.processingStartedAt ? (
-                                  <span className="text-blue-600">
-                                    Processing since: {(() => { try { const d = new Date(file.processingStartedAt as any); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); } catch { return '—'; } })()}
-                                  </span>
-                                ) : (
-                                  <span className="text-blue-600">Processing since: —</span>
-                                )}
+                                <span className="text-blue-600">
+                                  Processing since: {formatDateSafe(file.processingStartedAt)}
+                                </span>
                                 {contactNumbers.length > 0 && (
                                   <span className="inline-flex items-center gap-1 text-green-700 font-medium">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -744,12 +771,7 @@ export default function FilesPage() {
                             )}
                             {file.status === "completed" && file.completedAt && (
                               <p className="text-sm text-green-600">
-                                Completed: {(() => { try { const d = new Date(file.completedAt as any); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); } catch { return '—'; } })()}
-                              </p>
-                            )}
-                            {file.completedFile && (
-                              <p className="text-sm text-gray-500">
-                                by {file.completedFile.agentName}
+                                Completed: {formatDateSafe(file.completedAt)}
                               </p>
                             )}
                           </div>
@@ -811,11 +833,11 @@ export default function FilesPage() {
                           </Link>
                         )}
                         
-                        {file.status === "completed" && (file.completedFileId || file.completedFile) && (
+                        {file.status === "completed" && file.completedFileId && (
                           <button 
                             onClick={(e) => downloadCompletedFile(
-                              file.completedFile?.id || file.completedFileId || file.id, 
-                              file.completedFile?.originalName || file.name,
+                              file.completedFileId || file.id, 
+                              file.name,
                               e
                             )}
                             className="inline-flex items-center px-3 sm:px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -852,24 +874,24 @@ export default function FilesPage() {
           {/* Stats */}
           <div className="mt-6 sm:mt-8 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
-              <div className="text-lg sm:text-2xl font-bold text-gray-900">{files.length}</div>
+              <div className="text-lg sm:text-2xl font-bold text-gray-900">{fileStats.total}</div>
               <div className="text-xs sm:text-sm text-gray-500">Total Files</div>
             </div>
             <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
               <div className="text-lg sm:text-2xl font-bold text-yellow-600">
-                {files.filter(f => f.status === "pending_payment").length}
+                {fileStats.pendingPayment}
               </div>
               <div className="text-xs sm:text-sm text-gray-500">Pending Payment</div>
             </div>
             <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
               <div className="text-lg sm:text-2xl font-bold text-green-600">
-                {files.filter(f => f.status === "paid" || f.status === "processing" || f.status === "completed").length}
+                {fileStats.paid}
               </div>
               <div className="text-xs sm:text-sm text-gray-500">Paid</div>
             </div>
             <div className="bg-white rounded-lg shadow-md p-3 sm:p-4 text-center">
               <div className="text-lg sm:text-2xl font-bold text-blue-600">
-                {files.filter(f => f.status === "completed").length}
+                {fileStats.completed}
               </div>
               <div className="text-xs sm:text-sm text-gray-500">Completed</div>
             </div>
