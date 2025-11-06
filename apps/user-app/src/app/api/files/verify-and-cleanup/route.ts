@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let filesToCheck = [];
+    let filesToCheck: any[] = [];
 
     // If specific fileId provided, check only that file
     if (fileId) {
