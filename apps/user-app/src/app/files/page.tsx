@@ -6,6 +6,7 @@ import { AgentResponse } from "@/components/AgentResponse";
 import { useAuthContext } from "@/components/AuthProvider";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
+import { formatFileSize, getFileIcon, getStatusBadge } from "@/lib/fileUtils";
 
 interface FileData {
   id: string;
@@ -59,61 +60,35 @@ export default function FilesPage() {
   const lastFetchTimeRef = useRef<number>(0); // Track last fetch time
   const filesDataRef = useRef<FileData[]>([]); // Cache files data
   const lastUserIdRef = useRef<string | null>(null); // Track last user ID
-
-  // Sample data for demonstration
-  const sampleFiles: FileData[] = [
-    {
-      id: "1",
-      name: "contract.pdf",
-      size: 2048576, // 2MB
-      type: "application/pdf",
-      status: "pending_payment",
-      uploadDate: new Date("2024-01-15"),
-      paymentAmount: 100,
-    },
-    {
-      id: "2", 
-      name: "invoice.docx",
-      size: 1024000, // 1MB
-      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      status: "paid",
-      uploadDate: new Date("2024-01-14"),
-      paymentAmount: 100,
-      qrCode: "generated",
-    },
-    {
-      id: "3",
-      name: "screenshot.png",
-      size: 512000, // 512KB
-      type: "image/png",
-      status: "processing",
-      uploadDate: new Date("2024-01-13"),
-      paymentAmount: 100,
-    },
-    {
-      id: "4",
-      name: "report.pdf",
-      size: 3072000, // 3MB
-      type: "application/pdf",
-      status: "completed",
-      uploadDate: new Date("2024-01-12"),
-      paymentAmount: 100,
-    },
-  ];
+  const [contactNumbers, setContactNumbers] = useState<string[]>([]); // Contact numbers for processing files
 
   // Smart loading function that only fetches when needed
   const loadFiles = useCallback(async (forceRefresh = false) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('loadFiles called - forceRefresh:', forceRefresh, 'user:', !!user, 'isLoading:', isLoadingFilesRef.current);
-    }
-    
     if (!user || isLoadingFilesRef.current) return; // Prevent duplicate requests
     
     const now = Date.now();
-    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
     
-    // If we have cached data and it's not expired, use it
-    if (!forceRefresh && filesDataRef.current.length > 0 && (now - lastFetchTimeRef.current) < CACHE_DURATION) {
+    // Check if there was a recent delete - if so, force refresh to bypass cache
+    let shouldForceRefresh = forceRefresh;
+    try {
+      const lastDeleteTime = localStorage.getItem('lastFileDeleteTime');
+      if (lastDeleteTime) {
+        const deleteTimestamp = parseInt(lastDeleteTime, 10);
+        // Force refresh if delete happened in the last 30 seconds (reduced for performance)
+        if (now - deleteTimestamp < 30000) {
+          shouldForceRefresh = true;
+          // Also clear any cached data to prevent showing stale data
+          filesDataRef.current = [];
+          lastFetchTimeRef.current = 0;
+        }
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+    
+    // Simple cache - only use cached data if not forcing refresh and data exists
+    // No time-based expiry - only refresh on page load or manual refresh
+    if (!shouldForceRefresh && filesDataRef.current.length > 0) {
       setFiles(filesDataRef.current);
       setIsLoading(false);
       return;
@@ -128,12 +103,18 @@ export default function FilesPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
       
+      // Add cache-busting parameter if force refresh to bypass any caching layers
+      const cacheBuster = shouldForceRefresh ? `&_t=${Date.now()}` : '';
+      
       let response;
       try {
-        response = await fetch(`/api/files?userId=${user.userId}`, {
+        response = await fetch(`/api/files?userId=${user.userId}${cacheBuster}`, {
           signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate', // Always prevent browser caching
+            'Pragma': 'no-cache', // HTTP 1.0 compatibility
+            'Expires': '0', // Proxies
           },
         });
       } catch (fetchError) {
@@ -160,58 +141,73 @@ export default function FilesPage() {
         localPaidIds = new Set((raw ? JSON.parse(raw) : []) as string[]);
       } catch {}
 
-      // Transform the data to match our interface
-      const transformedFiles: FileData[] = result.files.map((file: any) => {
-        // Map database status to UI status
-        let uiStatus: FileData["status"];
-        switch (file.status) {
-          case 'pending_payment':
-            uiStatus = 'pending_payment';
-            break;
-          case 'uploaded':
-            uiStatus = 'pending_payment';
-            break;
-          case 'paid':
-            uiStatus = 'paid';
-            break;
-          case 'processing':
-            uiStatus = 'processing';
-            break;
-          case 'completed':
-            uiStatus = 'completed';
-            break;
-          default:
-            uiStatus = 'pending_payment';
-        }
-        // If we have a locally recorded paid status and server hasn't caught up yet,
-        // keep showing as paid until backend updates to processing/completed.
-        if ((uiStatus === 'pending_payment') && localPaidIds.has(file.id)) {
-          uiStatus = 'paid';
-        }
+      // Load locally-tracked deleted IDs to filter out ghost entries
+      let localDeletedIds: Set<string> = new Set();
+      try {
+        const raw = localStorage.getItem('deletedFileIds');
+        localDeletedIds = new Set((raw ? JSON.parse(raw) : []) as string[]);
+      } catch {}
 
-        return {
-          id: file.id,
-          name: file.originalName,
-          size: file.size,
-          type: file.mimeType,
-          status: uiStatus,
-          uploadDate: new Date(file.uploadedAt),
-          paymentAmount: 100, // Default amount
-          qrCode: file.metadata?.qrCode,
-          // Agent response data
-          agentResponse: file.agentResponse,
-          hasResponse: file.hasResponse,
-          agentId: file.agentId,
-          assignedAt: file.assignedAt,
-          respondedAt: file.respondedAt,
-          // Processing status data
-          processingStartedAt: file.processingStartedAt,
-          completedAt: file.completedAt,
-          // Completed file data
-          completedFile: file.completedFile,
-          completedFileId: file.completedFileId
-        };
-      });
+      // Transform the data to match our interface
+      const transformedFiles: FileData[] = result.files
+        .filter((file: any) => !localDeletedIds.has(file.id)) // Filter out locally deleted files
+        .map((file: any) => {
+          // Map database status to UI status
+          let uiStatus: FileData["status"];
+          switch (file.status) {
+            case 'pending_payment':
+              uiStatus = 'pending_payment';
+              break;
+            case 'uploaded':
+              uiStatus = 'pending_payment';
+              break;
+            case 'paid':
+              uiStatus = 'paid';
+              break;
+            case 'assigned':
+              // CRITICAL FIX: When admin assigns the file, keep showing as "paid"
+              // User doesn't need to know about internal assignment - they already paid
+              // Only show "processing" when agent actually starts working
+              uiStatus = 'paid';
+              break;
+            case 'processing':
+              uiStatus = 'processing';
+              break;
+            case 'completed':
+              uiStatus = 'completed';
+              break;
+            default:
+              uiStatus = 'pending_payment';
+          }
+          // If we have a locally recorded paid status and server hasn't caught up yet,
+          // keep showing as paid until backend updates to processing/completed.
+          if ((uiStatus === 'pending_payment') && localPaidIds.has(file.id)) {
+            uiStatus = 'paid';
+          }
+
+          return {
+            id: file.id,
+            name: file.originalName,
+            size: file.size,
+            type: file.mimeType,
+            status: uiStatus,
+            uploadDate: new Date(file.uploadedAt),
+            paymentAmount: 100, // Default amount
+            qrCode: file.metadata?.qrCode,
+            // Agent response data
+            agentResponse: file.agentResponse,
+            hasResponse: file.hasResponse,
+            agentId: file.agentId,
+            assignedAt: file.assignedAt,
+            respondedAt: file.respondedAt,
+            // Processing status data
+            processingStartedAt: file.processingStartedAt,
+            completedAt: file.completedAt,
+            // Completed file data
+            completedFile: file.completedFile,
+            completedFileId: file.completedFileId
+          };
+        });
       
       // Cache the data and update timestamp
       filesDataRef.current = transformedFiles;
@@ -233,6 +229,28 @@ export default function FilesPage() {
           }
         }
       } catch {}
+
+      // Cleanup deleted file IDs when they're confirmed gone from server
+      try {
+        const deletedKey = 'deletedFileIds';
+        const deletedRaw = localStorage.getItem(deletedKey);
+        const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+        if (deletedIds.length) {
+          const existingIds = new Set(result.files.map((f: any) => f.id));
+          const stillDeleted = deletedIds.filter(id => existingIds.has(id));
+          // If server no longer has these files, remove from deleted tracking
+          if (stillDeleted.length !== deletedIds.length) {
+            const confirmed = deletedIds.filter(id => !existingIds.has(id));
+            if (confirmed.length === 0) {
+              // All deleted files confirmed gone, clean up the timestamp too
+              localStorage.removeItem('lastFileDeleteTime');
+              localStorage.removeItem(deletedKey);
+            } else {
+              localStorage.setItem(deletedKey, JSON.stringify(confirmed));
+            }
+          }
+        }
+      } catch {}
     } catch (error: any) {
       if (error.name === 'AbortError') {
         setError('Request timeout - please try again');
@@ -251,14 +269,27 @@ export default function FilesPage() {
   useEffect(() => {
     if (user && !authLoading && !isLoadingFilesRef.current) {
       // Check if this is a different user or first load
-      if (lastUserIdRef.current !== user.userId) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Loading files - new user:', user.userId, 'previous:', lastUserIdRef.current);
+      const isNewUser = lastUserIdRef.current !== user.userId;
+      lastUserIdRef.current = user.userId;
+      
+      // Check if there was a recent deletion - force refresh if yes
+      let shouldForceRefresh = false;
+      try {
+        const lastDeleteTime = localStorage.getItem('lastFileDeleteTime');
+        if (lastDeleteTime) {
+          const deleteTimestamp = parseInt(lastDeleteTime, 10);
+          const timeSinceDelete = Date.now() - deleteTimestamp;
+          // Force refresh only if delete happened in the last 30 seconds (reduced for performance)
+          if (timeSinceDelete < 30000) {
+            shouldForceRefresh = true;
+          }
         }
-        lastUserIdRef.current = user.userId;
-        loadFiles();
-      } else if (process.env.NODE_ENV === 'development') {
-        console.log('Skipping loadFiles - same user, already loaded');
+      } catch (e) {
+        // Ignore localStorage errors
+      }
+      
+      if (isNewUser || shouldForceRefresh) {
+        loadFiles(shouldForceRefresh);
       }
     }
   }, [user, authLoading]); // Removed loadFiles from dependencies to prevent re-runs
@@ -274,52 +305,28 @@ export default function FilesPage() {
     return () => clearTimeout(timeout);
   }, [authLoading]);
 
-  const formatFileSize = useCallback((bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }, []);
+  // No auto-refresh - only fetch on page load or manual refresh
 
-  const getFileIcon = useCallback((type: string) => {
-    if (type.includes("pdf")) {
-      return (
-        <svg className="w-8 h-8 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-        </svg>
-      );
-    } else if (type.includes("image")) {
-      return (
-        <svg className="w-8 h-8 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-        </svg>
-      );
-    } else {
-      return (
-        <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-        </svg>
-      );
-    }
-  }, []);
-
-  const getStatusBadge = useCallback((status: FileData["status"]) => {
-    const statusConfig = {
-      pending_payment: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
-      pending: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
-      paid: { color: "bg-green-100 text-green-800", text: "Paid" },
-      processing: { color: "bg-blue-100 text-blue-800", text: "Processing" },
-      completed: { color: "bg-gray-100 text-gray-800", text: "Completed" }
+  // Fetch contact numbers on mount
+  useEffect(() => {
+    const fetchContactNumbers = async () => {
+      try {
+        const response = await fetch('/api/contact-numbers');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.isActive) {
+            setContactNumbers(data.contactNumbers || []);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching contact numbers:', error);
+      }
     };
-    
-    const config = statusConfig[status];
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
-        {config.text}
-      </span>
-    );
+
+    fetchContactNumbers();
   }, []);
+
+  // Using shared utility functions from fileUtils
 
   // Memoize filtered files to prevent unnecessary recalculations
   const filteredFiles = useMemo(() => 
@@ -327,15 +334,13 @@ export default function FilesPage() {
     [files, filter]
   );
 
-  const handlePaymentSuccess = (fileId: string) => {
-    
+  const handlePaymentSuccess = useCallback((fileId: string) => {
     // Update local state immediately for better UX
-    setFiles(prev => {
-      const updatedFiles = prev.map(file =>
+    setFiles(prev => 
+      prev.map(file =>
         file.id === fileId ? { ...file, status: "paid" as const } : file
-      );
-      return updatedFiles;
-    });
+      )
+    );
     
     // Also update cached data
     filesDataRef.current = filesDataRef.current.map(file =>
@@ -351,38 +356,29 @@ export default function FilesPage() {
         localStorage.setItem(key, JSON.stringify([...existing, fileId]));
       }
     } catch {}
-  };
 
-  // Function to refresh data when new files are detected
+    // Force refresh from server to ensure payment status is persisted
+    setTimeout(() => {
+      loadFiles(true);
+    }, 1000);
+  }, [loadFiles]);
+
+  // Manual refresh function (called by pull-to-refresh only)
   const refreshFiles = useCallback(() => {
     loadFiles(true); // Force refresh
   }, [loadFiles]);
 
-  // Throttled auto-refresh trigger to avoid excessive requests
-  const lastAutoRefreshRef = useRef<number>(0);
-  const AUTO_REFRESH_COOLDOWN_MS = 8000; // 8s cooldown between auto refreshes
-
-  const tryAutoRefresh = useCallback((reason?: string) => {
-    const now = Date.now();
-    if (now - lastAutoRefreshRef.current < AUTO_REFRESH_COOLDOWN_MS) return;
-    lastAutoRefreshRef.current = now;
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Files] auto-refresh', reason || '');
-    }
-    loadFiles(true);
-  }, [loadFiles]);
-
   
 
-  // Pull-to-refresh state
+  // Pull-to-refresh state (increased threshold to prevent accidental triggers)
   const [pullDistance, setPullDistance] = useState(0);
   const isPullingRef = useRef(false);
   const pullStartYRef = useRef<number | null>(null);
-  const PULL_THRESHOLD_PX = 64; // release threshold
-  const PULL_MAX_PX = 128; // visual limit
+  const PULL_THRESHOLD_PX = 100; // release threshold (increased from 64 to prevent accidents)
+  const PULL_MAX_PX = 150; // visual limit (increased from 128)
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (window.scrollY > 0) return; // only when scrolled to top
+    if (window.scrollY > 5) return; // only when scrolled to very top (5px tolerance)
     isPullingRef.current = true;
     pullStartYRef.current = e.touches[0].clientY;
     setPullDistance(0);
@@ -392,10 +388,10 @@ export default function FilesPage() {
     if (!isPullingRef.current || pullStartYRef.current == null) return;
     const currentY = e.touches[0].clientY;
     const delta = Math.max(0, currentY - pullStartYRef.current);
-    if (delta > 0) {
+    if (delta > 10) { // Need at least 10px pull before activating
       // prevent page scroll while pulling
       e.preventDefault();
-      const eased = Math.min(PULL_MAX_PX, delta * 0.6); // add a bit of resistance
+      const eased = Math.min(PULL_MAX_PX, delta * 0.5); // more resistance (0.5 instead of 0.6)
       setPullDistance(eased);
     }
   }, []);
@@ -407,63 +403,25 @@ export default function FilesPage() {
     pullStartYRef.current = null;
     setPullDistance(0);
     if (shouldRefresh) {
-      tryAutoRefresh('pull-to-refresh');
+      refreshFiles(); // Manual refresh via pull-to-refresh
     }
-  }, [pullDistance, tryAutoRefresh]);
+  }, [pullDistance, refreshFiles]);
 
   
 
-  // Refresh when window regains focus or tab becomes visible
-  useEffect(() => {
-    const onFocus = () => tryAutoRefresh('focus');
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') tryAutoRefresh('visibility');
-    };
+  // REMOVED auto-refresh on focus/visibility/scroll - too annoying for users
+  // Users can manually refresh by pull-to-refresh or reload button
 
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, [tryAutoRefresh]);
-
-  // Refresh when user scrolls near bottom (acts like infinite check for updates)
-  useEffect(() => {
-    const threshold = 200; // px from bottom
-    const onScroll = () => {
-      const scrolledToBottom = window.innerHeight + window.scrollY >= (document.body.offsetHeight - threshold);
-      if (scrolledToBottom) {
-        tryAutoRefresh('scroll-bottom');
-      }
-    };
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [tryAutoRefresh]);
-
-  const handleQRGenerate = (fileId: string) => {
+  const handleQRGenerate = useCallback((fileId: string) => {
     setFiles(prev =>
       prev.map(file =>
         file.id === fileId ? { ...file, qrCode: "generated" } : file
       )
     );
-  };
+  }, []);
 
-  // Listen for storage events to detect new file uploads from other tabs
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'newFileUploaded' && e.newValue) {
-        // New file uploaded, refresh the list
-        refreshFiles();
-        // Clear the storage event
-        localStorage.removeItem('newFileUploaded');
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, [refreshFiles]);
+  // REMOVED: Storage event auto-refresh - causes unexpected page refreshes
+  // Users can manually refresh if needed
 
   const handleDeleteFile = useCallback(async (fileId: string) => {
     if (!user) return;
@@ -472,10 +430,20 @@ export default function FilesPage() {
       return;
     }
 
+    // Check if file exists in current state (prevent double-delete)
+    const fileExists = files.some(file => file.id === fileId);
+    if (!fileExists) {
+      setError('File already deleted');
+      return;
+    }
+
     // Optimistic update - remove from UI immediately
     const originalFiles = [...files];
+    const originalCachedFiles = [...filesDataRef.current];
+    
     setFiles(prev => prev.filter(file => file.id !== fileId));
-    setError(''); // Clear any previous errors
+    filesDataRef.current = filesDataRef.current.filter(file => file.id !== fileId);
+    setError('');
 
     try {
       const response = await fetch(`/api/files?fileId=${fileId}&userId=${user.userId}`, {
@@ -487,13 +455,11 @@ export default function FilesPage() {
       if (!result.success) {
         // Revert optimistic update on failure
         setFiles(originalFiles);
+        filesDataRef.current = originalCachedFiles;
         throw new Error(result.message || 'Failed to delete file');
       }
       
-      // Update cached data as well
-      filesDataRef.current = filesDataRef.current.filter(file => file.id !== fileId);
-      
-      // Remove any local paid override for this file
+      // Remove from localStorage overrides
       try {
         const key = 'paidFileIds';
         const raw = localStorage.getItem(key);
@@ -502,73 +468,87 @@ export default function FilesPage() {
           localStorage.setItem(key, JSON.stringify(existing.filter(id => id !== fileId)));
         }
       } catch {}
+      
+      // Track deleted file ID to prevent it from showing up again
+      try {
+        const deletedKey = 'deletedFileIds';
+        const deletedRaw = localStorage.getItem(deletedKey);
+        const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+        if (!deletedIds.includes(fileId)) {
+          localStorage.setItem(deletedKey, JSON.stringify([...deletedIds, fileId]));
+        }
+      } catch {}
+      
+      // Mark deletion timestamp to force cache bypass on next load
+      try {
+        localStorage.setItem('lastFileDeleteTime', Date.now().toString());
+      } catch {}
+      
+      // Clear cache timestamp to force fresh fetch next time
+      lastFetchTimeRef.current = 0;
 
     } catch (error: any) {
       // Revert optimistic update on error
       setFiles(originalFiles);
+      filesDataRef.current = originalCachedFiles;
       setError(error.message || 'Failed to delete file. Please try again.');
     }
   }, [user, files]);
 
-  const downloadCompletedFile = useCallback(async (completedFileId: string, filename: string) => {
+  const downloadCompletedFile = useCallback(async (completedFileId: string, filename: string, event?: React.MouseEvent) => {
     if (!user) return;
     
+    // Prevent multiple clicks
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const button = event.currentTarget as HTMLButtonElement;
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Downloading...';
+    }
+    
     try {
-      // Show download progress
       setError(''); // Clear any previous errors
       
+      // Get signed download URL from API
       const response = await fetch(`/api/files/completed/${completedFileId}/download?userId=${user.userId}`);
-      if (response.ok) {
-        // Get file size for progress tracking
-        const contentLength = response.headers.get('content-length');
-        const total = contentLength ? parseInt(contentLength, 10) : 0;
-        
-        // Create download with progress
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('Failed to read file stream');
-        
-        const chunks: Uint8Array[] = [];
-        let received = 0;
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          chunks.push(value);
-          received += value.length;
-          
-          // Update progress if we know the total size
-          if (total > 0) {
-            const progress = Math.round((received / total) * 100);
-            if (process.env.NODE_ENV === 'development') {
-              console.log(`Download progress: ${progress}%`);
-            }
-          }
-        }
-        
-        // Combine chunks and create blob
-        const blob = new Blob(chunks as BlobPart[], { type: response.headers.get('content-type') || 'application/octet-stream' });
-        const url = window.URL.createObjectURL(blob);
-        
-        // Create download link
+      const result = await response.json();
+      
+      if (!result.success || !result.downloadUrl) {
+        throw new Error(result.error || 'Failed to get download URL');
+      }
+      
+      // Use window.open for more reliable download
+      window.open(result.downloadUrl, '_blank');
+      
+      // Alternative: If window.open is blocked, use anchor method
+      setTimeout(() => {
         const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
+        a.href = result.downloadUrl;
+        a.download = result.filename || filename;
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
-        
-        // Cleanup
-        setTimeout(() => {
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-        }, 100);
-        
-      } else {
-        throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-      }
+        setTimeout(() => document.body.removeChild(a), 100);
+      }, 100);
+      
     } catch (error: any) {
       setError(error.message || 'Failed to download completed file. Please try again.');
+    } finally {
+      // Re-enable button after download attempt
+      if (event) {
+        setTimeout(() => {
+          const button = event.currentTarget as HTMLButtonElement;
+          button.disabled = false;
+          button.innerHTML = `
+            <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Download Completed
+          `;
+        }, 1000);
+      }
     }
   }, [user]);
 
@@ -633,18 +613,18 @@ export default function FilesPage() {
       {/* Pull-to-refresh indicator area at top */}
       <div
         className="sticky top-0 z-10 flex items-center justify-center"
-        style={{ height: pullDistance ? Math.min(64, pullDistance) : 0 }}
+        style={{ height: pullDistance ? Math.min(100, pullDistance) : 0 }}
       >
         {pullDistance > 0 && (
           <div className="flex items-center space-x-2 text-blue-600 text-sm">
-            {pullDistance < 64 ? (
+            {pullDistance < 100 ? (
               <svg className="w-4 h-4 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             ) : (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
             )}
-            <span>{pullDistance < 64 ? 'Pull to refresh' : 'Release to refresh'}</span>
+            <span>{pullDistance < 100 ? 'Pull to refresh' : 'Release to refresh'}</span>
           </div>
         )}
       </div>
@@ -739,10 +719,28 @@ export default function FilesPage() {
                             <p className="text-sm text-gray-500">
                               {file.uploadDate.toLocaleDateString()}
                             </p>
-                            {file.status === "processing" && file.processingStartedAt && (
-                              <p className="text-sm text-blue-600">
-                                Processing since: {(() => { try { const d = new Date(file.processingStartedAt as any); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); } catch { return '—'; } })()}
-                              </p>
+                            {file.status === "processing" && (
+                              <div className="text-sm flex flex-wrap items-center gap-x-2">
+                                {file.processingStartedAt ? (
+                                  <span className="text-blue-600">
+                                    Processing since: {(() => { try { const d = new Date(file.processingStartedAt as any); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); } catch { return '—'; } })()}
+                                  </span>
+                                ) : (
+                                  <span className="text-blue-600">Processing since: —</span>
+                                )}
+                                {contactNumbers.length > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-green-700 font-medium">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                    </svg>
+                                    | For any issue contact: {contactNumbers.map((num, idx) => (
+                                      <a key={idx} href={`tel:${num}`} className="hover:underline">
+                                        {num}{idx < contactNumbers.length - 1 ? ', ' : ''}
+                                      </a>
+                                    ))}
+                                  </span>
+                                )}
+                              </div>
                             )}
                             {file.status === "completed" && file.completedAt && (
                               <p className="text-sm text-green-600">
@@ -800,10 +798,27 @@ export default function FilesPage() {
                           View
                         </Link>
                         
-                        {file.status === "completed" && file.completedFile && (
+                        {/* Edit button - for pending_payment, paid, and processing status */}
+                        {(file.status === "pending_payment" || file.status === "paid" || file.status === "processing") && (
+                          <Link
+                            href={`/files/edit/${file.id}`}
+                            className="inline-flex items-center px-3 sm:px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+                          >
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            Edit
+                          </Link>
+                        )}
+                        
+                        {file.status === "completed" && (file.completedFileId || file.completedFile) && (
                           <button 
-                            onClick={() => downloadCompletedFile(file.completedFile!.id, file.completedFile!.originalName)}
-                            className="inline-flex items-center px-3 sm:px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                            onClick={(e) => downloadCompletedFile(
+                              file.completedFile?.id || file.completedFileId || file.id, 
+                              file.completedFile?.originalName || file.name,
+                              e
+                            )}
+                            className="inline-flex items-center px-3 sm:px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { getCacheKey, setCached } from '@/lib/cache';
 
 export async function POST(request: NextRequest) {
   try {
@@ -59,55 +60,41 @@ export async function POST(request: NextRequest) {
       await newPaymentRef.set(paymentDocument);
     }
 
-    // Update file status to "paid" and assign agent
+    // Update file status to "paid" ONLY - NO automatic assignment
     try {
-      // Get all active agents for assignment
-      const agentsSnapshot = await adminDb.collection('agents')
-        .where('isActive', '==', true)
-        .get();
-
-      let assignedAgentId = null;
+      const now = new Date().toISOString();
       
-      if (!agentsSnapshot.empty) {
-        // Simple round-robin assignment
-        const agents = agentsSnapshot.docs;
-        const randomIndex = Math.floor(Math.random() * agents.length);
-        assignedAgentId = agents[randomIndex].id;
-      }
+      // Parallel execution: Update file AND clear cache simultaneously
+      await Promise.all([
+        adminDb.collection('files').doc(fileId).update({
+          status: 'paid',
+          updatedAt: now
+        }),
+        // Clear both caches in parallel
+        Promise.resolve().then(() => {
+          const cacheKey = getCacheKey('user_files', userId);
+          const singleFileCacheKey = getCacheKey('single_file', `${userId}_${fileId}`);
+          setCached(cacheKey, null, 0);
+          setCached(singleFileCacheKey, null, 0);
+        })
+      ]);
 
-      // Update file status and assign agent
-      const fileUpdateData: any = {
-        status: 'paid',
-        updatedAt: new Date().toISOString()
-      };
+      // Log async (don't wait for it)
+      adminDb.collection('logs').add({
+        actionType: 'file_status_updated',
+        actorId: 'system',
+        actorType: 'system',
+        fileId,
+        details: {
+          newStatus: 'paid',
+          triggeredBy: 'payment_success',
+          note: 'File marked as paid. Awaiting smart assignment by admin.'
+        },
+        timestamp: new Date()
+      }).catch(() => {}); // Silent fail on logging
 
-      if (assignedAgentId) {
-        fileUpdateData.assignedAgentId = assignedAgentId;
-        fileUpdateData.assignedAt = new Date().toISOString();
-        fileUpdateData.assignmentType = 'automatic';
-      }
-
-      await adminDb.collection('files').doc(fileId).update(fileUpdateData);
-
-      // Log the assignment
-      if (assignedAgentId) {
-        await adminDb.collection('logs').add({
-          actionType: 'agent_assignment',
-          actorId: 'system',
-          actorType: 'system',
-          fileId,
-          targetUserId: assignedAgentId,
-          details: {
-            assignmentType: 'automatic',
-            triggeredBy: 'payment_success'
-          },
-          timestamp: new Date()
-        });
-      }
-
-
-    } catch (assignmentError) {
-      // Don't fail the payment if assignment fails
+    } catch (updateError) {
+      // Don't fail the payment if file update fails
     }
 
     return NextResponse.json({
@@ -117,6 +104,9 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Create payment error:', error);
+    }
     return NextResponse.json(
       { success: false, message: 'An error occurred while creating payment' },
       { status: 500 }

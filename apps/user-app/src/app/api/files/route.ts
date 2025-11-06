@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import { getCached, setCached, getCacheKey } from '@/lib/cache';
+import { getCached, setCached, getCacheKey, deleteCached } from '@/lib/cache';
+import { deleteFile, extractKeyFromUrl } from '@/lib/b2';
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const fileId = searchParams.get('fileId');
+    const cacheBuster = searchParams.get('_t'); // Cache-busting parameter
 
     if (!userId) {
       return NextResponse.json(
@@ -17,6 +19,15 @@ export async function GET(request: NextRequest) {
 
     // If fileId is provided, return single file
     if (fileId) {
+      // Check cache first for single file (skip if cache-busting parameter present)
+      const singleFileCacheKey = getCacheKey('single_file', `${userId}_${fileId}`);
+      if (!cacheBuster) {
+        const cachedFile = getCached(singleFileCacheKey);
+        if (cachedFile) {
+          return NextResponse.json({ success: true, file: cachedFile });
+        }
+      }
+
       const fileDoc = await adminDb.collection('files').doc(fileId).get();
       
       if (!fileDoc.exists) {
@@ -36,22 +47,30 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // Get agent response if file has been responded to
+      // Parallelize agent and completed file fetches for speed
+      const [agentData, completedData] = await Promise.all([
+        // Fetch agent info if exists
+        fileData.assignedAgentId 
+          ? adminDb.collection('users').doc(fileData.assignedAgentId).get().catch(() => null)
+          : Promise.resolve(null),
+        // Fetch completed file if exists
+        fileData.status === 'completed' && fileData.completedFileId
+          ? adminDb.collection('completedFiles').doc(fileData.completedFileId).get().catch(() => null)
+          : Promise.resolve(null)
+      ]);
+
+      // Build agent response
       let agentResponse = null;
       if (fileData.responseFileURL || fileData.responseMessage) {
-        // Get agent information
         let agentInfo = null;
-        if (fileData.assignedAgentId) {
-          const agentDoc = await adminDb.collection('users').doc(fileData.assignedAgentId).get();
-          if (agentDoc.exists) {
-            const agentData = agentDoc.data();
-            if (agentData) {
-              agentInfo = {
-                id: fileData.assignedAgentId,
-                name: agentData.name,
-                email: agentData.email
-              };
-            }
+        if (agentData?.exists) {
+          const agent = agentData.data();
+          if (agent) {
+            agentInfo = {
+              id: fileData.assignedAgentId,
+              name: agent.name,
+              email: agent.email
+            };
           }
         }
 
@@ -63,24 +82,21 @@ export async function GET(request: NextRequest) {
         };
       }
 
-      // If completed, include completed file data
+      // Build completed file
       let completedFile: any = null;
-      if (fileData.status === 'completed' && fileData.completedFileId) {
-        const completedDoc = await adminDb.collection('completedFiles').doc(fileData.completedFileId).get();
-        if (completedDoc.exists) {
-          const completedData = completedDoc.data();
-          completedFile = {
-            id: fileData.completedFileId,
-            filename: completedData?.filename || '',
-            originalName: completedData?.originalName || '',
-            size: completedData?.size || 0,
-            mimeType: completedData?.mimeType || '',
-            filePath: completedData?.filePath || '',
-            uploadedAt: completedData?.uploadedAt || '',
-            agentId: completedData?.agentId || '',
-            agentName: completedData?.agentName || ''
-          };
-        }
+      if (completedData?.exists) {
+        const completed = completedData.data();
+        completedFile = {
+          id: fileData.completedFileId,
+          filename: completed?.filename || '',
+          originalName: completed?.originalName || '',
+          size: completed?.size || 0,
+          mimeType: completed?.mimeType || '',
+          filePath: completed?.filePath || '',
+          uploadedAt: completed?.uploadedAt || '',
+          agentId: completed?.agentId || '',
+          agentName: completed?.agentName || ''
+        };
       }
 
       const file = {
@@ -97,6 +113,9 @@ export async function GET(request: NextRequest) {
         filePath: fileData.filePath,
         metadata: fileData.metadata || {},
         createdAt: fileData.createdAt,
+        // User comment data
+        userComment: fileData.userComment,
+        userCommentUpdatedAt: fileData.userCommentUpdatedAt,
         // Agent response data
         agentResponse,
         hasResponse: !!fileData.responseFileURL,
@@ -107,26 +126,59 @@ export async function GET(request: NextRequest) {
         completedFileId: fileData.completedFileId
       };
 
+      // Smart cache for single file based on status
+      // Active states (paid, processing, assigned) = 10 seconds for FAST real-time updates
+      // Other states = 30 seconds (reduced from 5min to catch deletions faster)
+      const isActiveFile = fileData.status === 'paid' || 
+                          fileData.status === 'processing' || 
+                          fileData.status === 'assigned';
+      const singleFileTTL = isActiveFile ? 10000 : 30000; // 10s vs 30s
+      
+      setCached(singleFileCacheKey, file, singleFileTTL);
+
       return NextResponse.json({
         success: true,
         file
       });
     }
 
-    // Check cache first with longer TTL for better performance
+    // Check cache first with longer TTL for better performance (skip if cache-busting parameter present)
     const cacheKey = getCacheKey('user_files', userId);
-    const cachedResult = getCached(cacheKey);
-    if (cachedResult) {
-      return NextResponse.json(cachedResult);
+    if (!cacheBuster) {
+      const cachedResult = getCached(cacheKey);
+      if (cachedResult) {
+        return NextResponse.json(cachedResult);
+      }
     }
 
-    // Get user's files from Firestore with field selection to reduce data transfer
-    // Exclude fileContent to improve performance
+    // Get user's files from Firestore with optimized query
+    // Using composite index (userId + uploadedAt) for fast query
+    // Limit to 20 for fastest initial load - pagination can be added later
     const filesSnapshot = await adminDb
       .collection('files')
       .where('userId', '==', userId)
-      .select('id', 'userId', 'filename', 'originalName', 'size', 'mimeType', 'status', 'uploadedAt', 'processedAt', 'assignedAgentId', 'agentId', 'filePath', 'metadata', 'createdAt', 'responseFileURL', 'responseMessage', 'respondedAt', 'assignedAt', 'processingStartedAt', 'completedAt', 'completedFileId')
+      .orderBy('uploadedAt', 'desc')
+      .limit(20) // Reduced to 20 for sub-500ms response time
       .get();
+
+    // Early return if no files found
+    if (filesSnapshot.empty) {
+      const result = {
+        success: true,
+        files: [],
+        count: 0
+      };
+      
+      // Cache empty result for 30 seconds (shorter cache to catch new uploads quickly)
+      setCached(cacheKey, result, 30000);
+      
+      return NextResponse.json(result, {
+        headers: {
+          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+          'Content-Type': 'application/json; charset=utf-8',
+        }
+      });
+    }
 
     // Batch collect all unique agent IDs and completed file IDs
     const agentIds = new Set<string>();
@@ -143,9 +195,70 @@ export async function GET(request: NextRequest) {
     });
 
     // Batch fetch all agents and completed files in parallel
+    // Firestore 'in' query limited to 10 items, so chunk if needed
+    const fetchAgents = async () => {
+      if (agentIds.size === 0) return { docs: [] };
+      const agentIdArray = Array.from(agentIds);
+      
+      // If <= 10 agents, single query with field selection for faster response
+      if (agentIdArray.length <= 10) {
+        return adminDb.collection('users')
+          .where('__name__', 'in', agentIdArray)
+          .select('name', 'email') // Only fetch needed fields
+          .get();
+      }
+      
+      // If > 10, chunk into batches of 10
+      const chunks: string[][] = [];
+      for (let i = 0; i < agentIdArray.length; i += 10) {
+        chunks.push(agentIdArray.slice(i, i + 10));
+      }
+      
+      const results = await Promise.all(
+        chunks.map(chunk => 
+          adminDb.collection('users')
+            .where('__name__', 'in', chunk)
+            .select('name', 'email') // Only fetch needed fields
+            .get()
+        )
+      );
+      
+      return { docs: results.flatMap(r => r.docs) };
+    };
+
+    const fetchCompletedFiles = async () => {
+      if (completedFileIds.size === 0) return { docs: [] };
+      const completedIdArray = Array.from(completedFileIds);
+      
+      // If <= 10 files, single query with field selection for faster response
+      if (completedIdArray.length <= 10) {
+        return adminDb.collection('completedFiles')
+          .where('__name__', 'in', completedIdArray)
+          .select('filename', 'originalName', 'size', 'mimeType', 'filePath', 'uploadedAt', 'agentId', 'agentName') // Only fetch needed fields
+          .get();
+      }
+      
+      // If > 10, chunk into batches of 10
+      const chunks: string[][] = [];
+      for (let i = 0; i < completedIdArray.length; i += 10) {
+        chunks.push(completedIdArray.slice(i, i + 10));
+      }
+      
+      const results = await Promise.all(
+        chunks.map(chunk => 
+          adminDb.collection('completedFiles')
+            .where('__name__', 'in', chunk)
+            .select('filename', 'originalName', 'size', 'mimeType', 'filePath', 'uploadedAt', 'agentId', 'agentName') // Only fetch needed fields
+            .get()
+        )
+      );
+      
+      return { docs: results.flatMap(r => r.docs) };
+    };
+
     const [agentsSnapshot, completedFilesSnapshot] = await Promise.all([
-      agentIds.size > 0 ? adminDb.collection('users').where('__name__', 'in', Array.from(agentIds)).select('name', 'email').get() : Promise.resolve({ docs: [] }),
-      completedFileIds.size > 0 ? adminDb.collection('completedFiles').where('__name__', 'in', Array.from(completedFileIds)).select('filename', 'originalName', 'size', 'mimeType', 'filePath', 'uploadedAt', 'agentId', 'agentName').get() : Promise.resolve({ docs: [] })
+      fetchAgents(),
+      fetchCompletedFiles()
     ]);
 
     // Create lookup maps for O(1) access
@@ -218,6 +331,9 @@ export async function GET(request: NextRequest) {
         filePath: data.filePath,
         metadata: data.metadata || {},
         createdAt: data.createdAt,
+        // User comment data
+        userComment: data.userComment,
+        userCommentUpdatedAt: data.userCommentUpdatedAt,
         // Agent response data
         agentResponse,
         hasResponse: !!data.responseFileURL,
@@ -232,13 +348,8 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Sort files by uploadedAt in descending order (newest first)
-    files.sort((a, b) => {
-      const dateA = new Date(a.uploadedAt || a.createdAt || 0);
-      const dateB = new Date(b.uploadedAt || b.createdAt || 0);
-      return dateB.getTime() - dateA.getTime();
-    });
-
+    // Files are already sorted by Firestore (orderBy uploadedAt desc)
+    // No JavaScript sorting needed - saves CPU time!
 
     const result = {
       success: true,
@@ -246,10 +357,32 @@ export async function GET(request: NextRequest) {
       count: files.length
     };
 
-    // Cache the result for 15 seconds to keep user view fresh on agent updates
-    setCached(cacheKey, result, 15000);
+    // Smart caching: Check if user has active files (paid/processing/assigned/completed with missing data)
+    const hasActiveFiles = files.some(f => 
+      f.status === 'paid' || 
+      f.status === 'processing' || 
+      f.status === 'assigned' ||
+      // Include completed files that might be missing completedFile data
+      (f.status === 'completed' && !f.completedFile)
+    );
 
-    return NextResponse.json(result);
+    // SMART CACHE STRATEGY:
+    // - If user has active files waiting for agent action: 10 seconds (for FAST real-time updates)
+    // - Otherwise: 30 seconds (REDUCED from 5 minutes to catch admin deletions faster)
+    const cacheTTL = hasActiveFiles ? 10000 : 30000; // 10s vs 30s (reduced from 5min)
+    const maxAge = hasActiveFiles ? 10 : 30;
+    const staleTime = hasActiveFiles ? 20 : 60;
+
+    setCached(cacheKey, result, cacheTTL);
+
+    // Return with dynamic cache headers based on file states
+    return NextResponse.json(result, {
+      headers: {
+        'Cache-Control': `public, s-maxage=${maxAge}, stale-while-revalidate=${staleTime}`,
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Cache-Strategy': hasActiveFiles ? 'realtime' : 'cached', // Debug header
+      }
+    });
 
   } catch (error: any) {
     if (process.env.NODE_ENV === 'development') {
@@ -335,9 +468,15 @@ export async function DELETE(request: NextRequest) {
     const fileDoc = await adminDb.collection('files').doc(fileId).get();
     
     if (!fileDoc.exists) {
+      // File might have been deleted already - return success to prevent error
+      // Also clear cache to ensure consistency
+      const cacheKey = getCacheKey('user_files', userId);
+      const singleFileCacheKey = getCacheKey('single_file', `${userId}_${fileId}`);
+      deleteCached(cacheKey);
+      deleteCached(singleFileCacheKey);
+      
       return NextResponse.json(
-        { success: false, message: 'File not found' },
-        { status: 404 }
+        { success: true, message: 'File already deleted' }
       );
     }
 
@@ -349,16 +488,36 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Delete the file document and clear cache
-    await adminDb.collection('files').doc(fileId).delete();
+    // Extract B2 file key before deleting Firestore document
+    const filePath = fileData?.filePath;
+    const fileUrl = fileData?.fileUrl;
     
-    // Clear cache for this user's files
+    // Determine B2 key for deletion
+    let b2Key = filePath;
+    if (!b2Key && fileUrl) {
+      b2Key = extractKeyFromUrl(fileUrl);
+    }
+
+    // Delete from B2 and Firestore in parallel for speed
+    await Promise.all([
+      // Delete the file document from Firestore
+      adminDb.collection('files').doc(fileId).delete(),
+      // Delete file from B2 storage (if key exists)
+      b2Key ? deleteFile(b2Key).catch(() => {
+        // Silent fail - file might not exist in B2
+      }) : Promise.resolve()
+    ]);
+
+    // IMPORTANT: Clear cache AFTER successful deletion to ensure cache invalidation
     const cacheKey = getCacheKey('user_files', userId);
-    setCached(cacheKey, null, 0); // Clear cache immediately
+    const singleFileCacheKey = getCacheKey('single_file', `${userId}_${fileId}`);
+    deleteCached(cacheKey);
+    deleteCached(singleFileCacheKey);
 
     return NextResponse.json({
       success: true,
-      message: 'File deleted successfully'
+      message: 'File deleted successfully',
+      deletedAt: Date.now() // Timestamp to help client invalidate cache
     });
 
   } catch (error: any) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { uploadFile } from '@/lib/b2';
 
 // Ensure Node.js runtime for Buffer and formData file handling, especially in Android WebView uploads
 export const runtime = 'nodejs';
@@ -26,9 +27,9 @@ interface CreateFileData {
   size: number;
   mimeType: string;
   filePath: string;
+  fileUrl: string;
   status?: string;
   uploadedAt?: string;
-  fileContent?: string;
   metadata?: Record<string, any>;
 }
 
@@ -182,53 +183,78 @@ export async function POST(request: NextRequest) {
     const uniqueFilename = generateUniqueFilename(originalName);
     const filePath = `uploads/${userId}/${uniqueFilename}`;
 
-    // Convert file to buffer for database storage
+    // Convert file to buffer for B2 upload
     let fileBuffer: Buffer;
-    let base64Content: string;
     
     try {
       const arrayBuffer = await file.arrayBuffer();
       fileBuffer = Buffer.from(arrayBuffer);
-      base64Content = fileBuffer.toString('base64');
+      
+      // Validate buffer has content
+      if (fileBuffer.length === 0) {
+        return NextResponse.json(
+          { success: false, message: 'File is empty. Please select a valid file.' },
+          { status: 400 }
+        );
+      }
     } catch (bufferError: any) {
-      console.error('Buffer conversion error:', bufferError);
       return NextResponse.json(
         { success: false, message: 'Failed to process file data. File may be corrupted.' },
         { status: 400 }
       );
     }
     
-    // Create file document in Firestore with file content
-    const fileDocumentData: CreateFileData = {
+    // Upload file to Backblaze B2 with timeout
+    let uploadResult;
+    try {
+      // Add timeout wrapper for B2 upload (reduced to 8s for better responsiveness)
+      const uploadPromise = uploadFile(fileBuffer, filePath, mimeType);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Upload timeout')), 8000) // 8s timeout
+      );
+      
+      uploadResult = await Promise.race([uploadPromise, timeoutPromise]);
+    } catch (uploadError: any) {
+      return NextResponse.json(
+        { success: false, message: uploadError.message === 'Upload timeout' ? 'Upload timeout. Please try again.' : 'Failed to upload file to storage.' },
+        { status: 500 }
+      );
+    }
+
+    // Create file document in Firestore with metadata only
+    const fileRef = adminDb.collection('files').doc();
+    const fileId = fileRef.id;
+
+    const fileDocument = {
+      id: fileId,
       userId,
       filename: uniqueFilename,
       originalName,
       size,
       mimeType,
       filePath,
-      status: 'pending_payment', // Set initial status
-      uploadedAt: new Date().toISOString(),
-      fileContent: base64Content, // Store file content as base64
-      metadata: metadata || {}
-    };
-
-    const fileRef = adminDb.collection('files').doc();
-    const fileId = fileRef.id;
-
-    const fileDocument = {
-      id: fileId,
-      ...fileDocumentData,
-      // Store file buffer temporarily (should be moved to Firebase Storage)
-      fileBuffer: base64Content, // Use the already converted base64 content
+      fileUrl: uploadResult.url,
       status: 'pending_payment', // Initial status - waiting for payment
       uploadedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
+      metadata: metadata || {}
     };
 
     try {
       await fileRef.set(fileDocument);
+      
+      // Clear user's file cache immediately so new file shows up
+      const { getCacheKey, setCached } = await import('@/lib/cache');
+      const cacheKey = getCacheKey('user_files', userId);
+      setCached(cacheKey, null, 0);
     } catch (firestoreError: any) {
-      console.error('Firestore write error:', firestoreError);
+      // If Firestore write fails, try to clean up B2 file
+      try {
+        const { deleteFile } = await import('@/lib/b2');
+        await deleteFile(filePath);
+      } catch (cleanupError) {
+        // Silent cleanup fail
+      }
       return NextResponse.json(
         { success: false, message: 'Failed to save file to database. Please try again.' },
         { status: 500 }
@@ -251,34 +277,17 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('Upload error:', error);
-    
-    // Provide more specific error messages based on error type
-    let errorMessage = 'An error occurred during upload';
-    let statusCode = 500;
-    
-    if (error.code === 'permission-denied') {
-      errorMessage = 'Permission denied. Please check your authentication.';
-      statusCode = 403;
-    } else if (error.code === 'invalid-argument') {
-      errorMessage = 'Invalid file data provided.';
-      statusCode = 400;
-    } else if (error.code === 'resource-exhausted') {
-      errorMessage = 'File too large or server resources exhausted.';
-      statusCode = 413;
-    } else if (error.message) {
-      errorMessage = error.message;
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Upload error:', error);
     }
     
+    let statusCode = 500;
+    if (error.code === 'permission-denied') statusCode = 403;
+    else if (error.code === 'invalid-argument') statusCode = 400;
+    else if (error.code === 'resource-exhausted') statusCode = 413;
+    
     return NextResponse.json(
-      { 
-        success: false, 
-        message: errorMessage,
-        ...(process.env.NODE_ENV === 'development' && { 
-          error: error.message,
-          stack: error.stack 
-        })
-      },
+      { success: false, message: 'An error occurred during upload' },
       { status: statusCode }
     );
   }

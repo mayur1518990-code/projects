@@ -3,18 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthContext } from "@/components/AuthProvider";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useState } from "react";
 
 export const Navbar = memo(function Navbar() {
   const { user, loading, signOut } = useAuthContext();
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Navbar render - user:', user, 'loading:', loading);
-    }
-  }, [user, loading]);
 
   const isActive = useCallback((path: string) => pathname === path, [pathname]);
 
@@ -79,7 +73,10 @@ export const Navbar = memo(function Navbar() {
             {/* Desktop User Menu */}
             <div className="hidden md:flex items-center space-x-1 sm:space-x-2 md:space-x-4">
               {loading ? (
-                <div className="text-xs sm:text-sm text-gray-500">Loading...</div>
+                <div className="flex items-center space-x-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <span className="text-xs sm:text-sm text-gray-500">Loading...</span>
+                </div>
               ) : user ? (
                 <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4">
                   <span className="hidden sm:inline text-xs sm:text-sm text-gray-700 truncate max-w-[20vw] md:max-w-none">
@@ -143,7 +140,12 @@ export const Navbar = memo(function Navbar() {
 
               {/* Mobile User Menu */}
               {loading ? (
-                <div className="block px-3 py-2 text-sm text-gray-500">Loading...</div>
+                <div className="block px-3 py-2">
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span className="text-sm text-gray-500">Loading...</span>
+                  </div>
+                </div>
               ) : user ? (
                 <div className="border-t border-gray-200 pt-4 pb-3">
                   <div className="flex items-center px-3">

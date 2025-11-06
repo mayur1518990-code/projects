@@ -1,7 +1,6 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage, FirebaseStorage, connectStorageEmulator } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -23,7 +22,6 @@ if (!isConfigValid) {
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
-let storage: FirebaseStorage;
 
 try {
   // Use existing app if available to prevent multiple initializations
@@ -37,7 +35,6 @@ try {
   // Initialize services with performance optimizations
   auth = getAuth(app);
   db = getFirestore(app);
-  storage = getStorage(app);
   
   // Configure Firebase for better performance
   if (typeof window !== 'undefined') {
@@ -55,7 +52,6 @@ try {
       try {
         connectAuthEmulator(auth, 'http://localhost:9099');
         connectFirestoreEmulator(db, 'localhost', 8080);
-        connectStorageEmulator(storage, 'localhost', 9199);
       } catch (error) {
         // Emulators already connected or not available
         if (process.env.NODE_ENV === 'development') {
@@ -70,5 +66,5 @@ try {
 }
 
 // Export services
-export { auth, db, storage };
+export { auth, db };
 export default app;

@@ -4,6 +4,7 @@ import { useAuthContext } from "@/components/AuthProvider";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { formatFileSize, getFileIconLarge } from "@/lib/fileUtils";
 
 interface FileData {
   id: string;
@@ -16,6 +17,8 @@ interface FileData {
   uploadedAt: string;
   filePath: string;
   metadata: any;
+  userComment?: string;
+  userCommentUpdatedAt?: string;
   completedFile?: {
     id: string;
     filename: string;
@@ -44,16 +47,23 @@ export default function ViewDocumentPage() {
   const [contentError, setContentError] = useState("");
   const isLoadingRef = useRef(false); // Prevent duplicate requests
   const fileCacheRef = useRef<Map<string, { file: FileData; content: string; timestamp: number }>>(new Map());
+  const hasFetchedRef = useRef(false); // Prevent duplicate initial fetches
+  const userIdRef = useRef<string | null>(null); // Track user ID changes
 
-  const loadFile = useCallback(async () => {
-    if (!user || !fileId || isLoadingRef.current) return;
+  const loadFile = useCallback(async (force: boolean = false) => {
+    if (!user || !fileId || (isLoadingRef.current && !force)) return;
+    
+    // Prevent duplicate fetches for the same user and file (unless forced)
+    if (!force && hasFetchedRef.current && userIdRef.current === user.userId) {
+      return;
+    }
 
     // Check cache first
     const cacheKey = `${fileId}-${user.userId}`;
     const cached = fileCacheRef.current.get(cacheKey);
     const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+    if (!force && cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
       setFile(cached.file);
       setFileContent(cached.content);
       setLoading(false);
@@ -62,6 +72,8 @@ export default function ViewDocumentPage() {
 
     try {
       isLoadingRef.current = true;
+      hasFetchedRef.current = true;
+      userIdRef.current = user.userId;
       setLoading(true);
       setError("");
 
@@ -95,7 +107,7 @@ export default function ViewDocumentPage() {
       setLoading(false);
       isLoadingRef.current = false;
     }
-  }, [user, fileId]);
+  }, [user?.userId, fileId]);
 
   const loadFileContent = useCallback(async (fileData: FileData) => {
     try {
@@ -152,37 +164,9 @@ export default function ViewDocumentPage() {
     if (user && !authLoading && fileId) {
       loadFile();
     }
-  }, [user, authLoading, fileId, loadFile]);
+  }, [user?.userId, authLoading, fileId, loadFile]);
 
-  const formatFileSize = useCallback((bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }, []);
-
-  const getFileIcon = useCallback((type: string) => {
-    if (type.includes("pdf")) {
-      return (
-        <svg className="w-12 h-12 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-        </svg>
-      );
-    } else if (type.includes("image")) {
-      return (
-        <svg className="w-12 h-12 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-        </svg>
-      );
-    } else {
-      return (
-        <svg className="w-12 h-12 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-        </svg>
-      );
-    }
-  }, []);
+  // Using shared utility functions from fileUtils
 
   const renderFileContent = useCallback(() => {
     if (!file || !fileContent) return null;
@@ -273,7 +257,7 @@ export default function ViewDocumentPage() {
     return (
       <div className="text-center py-6 sm:py-8">
         <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-          {getFileIcon(file.mimeType)}
+          {getFileIconLarge(file.mimeType)}
         </div>
         <p className="text-sm sm:text-base text-gray-500 mb-3 sm:mb-4">
           Preview not available for this file type
@@ -385,7 +369,7 @@ export default function ViewDocumentPage() {
               </button>
               <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
                 <div className="flex-shrink-0">
-                  {getFileIcon(file.mimeType)}
+                  {getFileIconLarge(file.mimeType)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <h1 className="text-sm sm:text-lg font-semibold text-gray-900 truncate">{file.originalName}</h1>
@@ -464,6 +448,26 @@ export default function ViewDocumentPage() {
           
           {!contentLoading && !contentError && renderFileContent()}
         </div>
+
+        {/* User Comment Section */}
+        {file.userComment && (
+          <div className="mt-6 bg-white rounded-lg shadow-sm p-4 sm:p-6">
+            <div className="flex items-start">
+              <svg className="w-5 h-5 text-purple-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 13V5a2 2 0 00-2-2H4a2 2 0 00-2 2v8a2 2 0 002 2h3l3 3 3-3h3a2 2 0 002-2zM5 7a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm1 3a1 1 0 100 2h3a1 1 0 100-2H6z" clipRule="evenodd" />
+              </svg>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">Your Comment</h3>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{file.userComment}</p>
+                {file.userCommentUpdatedAt && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Updated: {new Date(file.userCommentUpdatedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo } from "react";
 import Link from "next/link";
 import { LazyQRCodeDisplay } from "./LazyQRCodeDisplay";
 import { LazyPaymentButton } from "./LazyPaymentButton";
+import { formatFileSize, getFileIcon, getStatusBadge } from "@/lib/fileUtils";
 
 interface FileItemProps {
   file: {
@@ -40,52 +41,7 @@ export const FileItem = memo(function FileItem({
   onDownloadCompletedFile,
   onError
 }: FileItemProps) {
-  const formatFileSize = useCallback((bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }, []);
-
-  const getFileIcon = useCallback((type: string) => {
-    if (type.includes("pdf")) {
-      return (
-        <svg className="w-8 h-8 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-        </svg>
-      );
-    } else if (type.includes("image")) {
-      return (
-        <svg className="w-8 h-8 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-        </svg>
-      );
-    } else {
-      return (
-        <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-        </svg>
-      );
-    }
-  }, []);
-
-  const getStatusBadge = useCallback((status: string) => {
-    const statusConfig = {
-      pending_payment: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
-      pending: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
-      paid: { color: "bg-green-100 text-green-800", text: "Paid" },
-      processing: { color: "bg-blue-100 text-blue-800", text: "Processing" },
-      completed: { color: "bg-gray-100 text-gray-800", text: "Completed" }
-    };
-    
-    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
-        {config.text}
-      </span>
-    );
-  }, []);
+  // Using shared utility functions from fileUtils
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -166,6 +122,19 @@ export const FileItem = memo(function FileItem({
               </svg>
               View
             </Link>
+            
+            {/* Edit button - only for pending_payment and paid status */}
+            {(file.status === "pending_payment" || file.status === "paid") && (
+              <Link
+                href={`/files/edit/${file.id}`}
+                className="inline-flex items-center px-3 sm:px-4 py-2 bg-purple-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                <svg className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit
+              </Link>
+            )}
             
             {file.status === "completed" && file.completedFile && (
               <button 

@@ -4,6 +4,7 @@ import { LazyQRCodeDisplay } from "@/components/LazyQRCodeDisplay";
 import { LazyPaymentButton } from "@/components/LazyPaymentButton";
 import { useAuthContext } from "@/components/AuthProvider";
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { formatFileSize, getFileIcon, getStatusBadge, getAlertStyles, getAlertIcon } from "@/lib/fileUtils";
 
 interface UploadedFile {
   id: string;
@@ -15,6 +16,13 @@ interface UploadedFile {
   qrCode?: string;
 }
 
+interface Alert {
+  id: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'error';
+  createdAt: string;
+}
+
 export default function UploadPage() {
   const { user, loading } = useAuthContext();
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -23,6 +31,54 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [authTimeout, setAuthTimeout] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
+
+  // Fetch active alerts with debouncing and smart caching
+  useEffect(() => {
+    let lastFetchTime = 0;
+    let debounceTimer: NodeJS.Timeout;
+    const DEBOUNCE_MS = 1000; // 1 second debounce
+    const CACHE_MS = 5 * 60 * 1000; // 5 minutes cache
+    
+    const fetchAlerts = async () => {
+      const now = Date.now();
+      
+      // Skip if we fetched recently (within cache period)
+      if (now - lastFetchTime < CACHE_MS) {
+        return;
+      }
+      
+      try {
+        const response = await fetch("/api/alerts");
+        if (response.ok) {
+          const data = await response.json();
+          setAlerts(data.alerts || []);
+          lastFetchTime = now;
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error("Error fetching alerts:", error);
+        }
+      }
+    };
+    
+    // Initial fetch
+    fetchAlerts();
+    
+    // Debounced focus handler
+    const handleFocus = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fetchAlerts, DEBOUNCE_MS);
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      clearTimeout(debounceTimer);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
 
   // Optimized authentication handling with timeout protection
   useEffect(() => {
@@ -32,9 +88,6 @@ export default function UploadPage() {
     const authTimeoutId = setTimeout(() => {
       if (loading) {
         setAuthTimeout(true);
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Auth loading timeout - proceeding without user');
-        }
       }
     }, 3000); // 3 second timeout for auth loading
 
@@ -74,51 +127,16 @@ export default function UploadPage() {
     "image/svg+xml"
   ];
 
-  const formatFileSize = useCallback((bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  // Using shared utility functions from fileUtils
+  
+  const handleDismissAlert = useCallback((id: string) => {
+    setDismissedAlerts(prev => [...prev, id]);
   }, []);
-
-  const getFileIcon = useCallback((type: string) => {
-    if (type.includes("pdf")) {
-      return (
-        <svg className="w-8 h-8 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-        </svg>
-      );
-    } else if (type.includes("image")) {
-      return (
-        <svg className="w-8 h-8 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-        </svg>
-      );
-    } else {
-      return (
-        <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-        </svg>
-      );
-    }
-  }, []);
-
-  const getStatusBadge = useCallback((status: UploadedFile["status"]) => {
-    const statusConfig = {
-      pending: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
-      paid: { color: "bg-green-100 text-green-800", text: "Paid" },
-      processing: { color: "bg-blue-100 text-blue-800", text: "Processing" },
-      completed: { color: "bg-gray-100 text-gray-800", text: "Completed" }
-    };
-    
-    const config = statusConfig[status];
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
-        {config.text}
-      </span>
-    );
-  }, []);
+  
+  const visibleAlerts = useMemo(() => 
+    alerts.filter(alert => !dismissedAlerts.includes(alert.id)),
+    [alerts, dismissedAlerts]
+  );
 
   const uploadFileToServer = useCallback(async (file: File) => {
     try {
@@ -287,6 +305,43 @@ export default function UploadPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Alert Banners - Fixed below navbar */}
+      {visibleAlerts.length > 0 && (
+        <div className="fixed top-12 sm:top-14 md:top-16 left-0 right-0 bg-white border-b shadow-md z-40">
+          <div className="container mx-auto px-3 sm:px-4">
+            {visibleAlerts.map((alert) => (
+              <div
+                key={alert.id}
+                className={`border-l-4 p-4 my-2 rounded ${getAlertStyles(alert.type)}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span className="text-2xl flex-shrink-0">{getAlertIcon(alert.type)}</span>
+                    <div className="scroll-container flex-1 min-w-0">
+                      <p className="scroll-text text-sm sm:text-base font-medium">
+                        {alert.message}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDismissAlert(alert.id)}
+                    className="ml-4 text-xl hover:opacity-70 transition-opacity flex-shrink-0"
+                    aria-label="Dismiss alert"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Spacer for navbar + fixed alert */}
+      {visibleAlerts.length > 0 && (
+        <div className="h-12 sm:h-14 md:h-16" />
+      )}
+      
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 md:py-8">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4 sm:mb-6">

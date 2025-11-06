@@ -105,37 +105,22 @@
           "order": "DESCENDING"
         }
       ]
-    }
-  ],
-  "fieldOverrides": [
-    {
-      "collectionGroup": "files",
-      "fieldPath": "fileContent",
-      "indexes": [
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
-        {
-          "arrayConfig": "CONTAINS",
-          "queryScope": "COLLECTION"
-        }
-      ]
     },
     {
-      "collectionGroup": "files",
-      "fieldPath": "fileBuffer",
-      "indexes": [
+      "collectionGroup": "alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
         {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
         },
         {
-          "arrayConfig": "CONTAINS",
-          "queryScope": "COLLECTION"
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
         }
       ]
     }
-  ]
+  ],
+  "fieldOverrides": []
 }
 

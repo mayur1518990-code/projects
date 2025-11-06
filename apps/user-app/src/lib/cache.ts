@@ -19,7 +19,7 @@ class LRUCache<T> {
   private maxSize: number;
   private defaultTTL: number;
 
-  constructor(maxSize: number = 100, defaultTTL: number = 300000) { // 5 minutes default TTL
+  constructor(maxSize: number = 500, defaultTTL: number = 300000) { // Increased cache size to 500, 5 minutes default TTL
     this.maxSize = maxSize;
     this.defaultTTL = defaultTTL;
   }
@@ -83,55 +83,45 @@ class LRUCache<T> {
   }
 }
 
-// Global cache instance
-const cache = new LRUCache<any>(100, 300000); // 100 items, 5 minutes TTL
+// Global cache instance (increased size for better performance)
+const cache = new LRUCache<any>(500, 300000); // 500 items, 5 minutes TTL
 
-// Cleanup expired entries every 5 minutes
-setInterval(() => {
-  cache.cleanup();
-}, 300000);
+// Cleanup expired entries every 15 minutes (less frequent for better performance)
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    cache.cleanup();
+  }, 900000); // 15 minutes
+}
 
 export function getCacheKey(prefix: string, ...parts: (string | number)[]): string {
   return `${prefix}:${parts.join(':')}`;
 }
 
 export function getCached<T>(key: string): T | null {
-  if (process.env.USER_APP_CACHE !== 'true') {
-    return null;
-  }
-  
+  // Caching enabled by default for better performance
   return cache.get(key);
 }
 
 export function setCached<T>(key: string, value: T, ttl?: number): void {
-  if (process.env.USER_APP_CACHE !== 'true') {
-    return;
-  }
-  
+  // Caching enabled by default for better performance
   cache.set(key, value, ttl);
 }
 
 export function deleteCached(key: string): void {
-  if (process.env.USER_APP_CACHE !== 'true') {
-    return;
-  }
-  
+  // Caching enabled by default for better performance
   cache.delete(key);
 }
 
 export function clearCache(): void {
-  if (process.env.USER_APP_CACHE !== 'true') {
-    return;
-  }
-  
+  // Caching enabled by default for better performance
   cache.clear();
 }
 
 export function getCacheStats() {
   return {
-    enabled: process.env.USER_APP_CACHE === 'true',
+    enabled: true, // Always enabled for performance
     size: cache.size(),
-    maxSize: 100
+    maxSize: 500
   };
 }
 

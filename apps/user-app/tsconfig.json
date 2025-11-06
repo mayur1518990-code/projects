@@ -5,7 +5,10 @@
     "paths": {
       "@/*": ["./src/*"],
       "@shared/*": ["../../shared/*"]
-    }
+    },
+    "incremental": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
     "next-env.d.ts",
@@ -13,5 +16,5 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", ".next", "dist", "build"]
 }

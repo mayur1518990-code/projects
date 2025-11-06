@@ -14,10 +14,23 @@ interface User {
 // Cache for user data to avoid repeated localStorage reads
 let userCache: User | null = null;
 let cacheTimestamp: number = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 60 * 1000; // 1 minute (reduced for better responsiveness)
 
 export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
+  // Initialize with localStorage data to prevent login flash
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const parsedUser = JSON.parse(storedUser);
+        userCache = parsedUser;
+        cacheTimestamp = Date.now();
+        return parsedUser;
+      }
+    } catch {}
+    return null;
+  });
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
@@ -67,59 +80,58 @@ export function useAuth() {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        // Reduced timeout to 1 second for much faster UX
+        // Fast timeout for better UX - only for fallback if Firebase fails
         timeoutRef.current = setTimeout(() => {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('Auth initialization timeout - proceeding without user');
+          // If we already have user from localStorage, keep them logged in
+          if (user) {
+            setLoading(false);
+            setInitialized(true);
+          } else {
+            // If no user data anywhere, show login
+            setLoading(false);
+            setInitialized(true);
           }
-          setLoading(false);
-          setInitialized(true);
-        }, 1000);
+        }, 1000); // 1s timeout for faster response
 
-        // Check localStorage first for immediate response
-        const storedUser = getUserFromStorage();
-        if (storedUser) {
-          setUser(storedUser);
-          setLoading(false);
-          setInitialized(true);
-        }
-
-        // Initialize auth listener with optimized callback
+        // Initialize auth listener immediately - don't wait for localStorage
         unsubscribeRef.current = onAuthStateChanged(auth, (firebaseUser) => {
           if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
           }
           
-          if (process.env.NODE_ENV === 'development') {
-            console.log('Auth state changed:', firebaseUser ? 'User logged in' : 'User logged out');
-          }
-          
           if (firebaseUser) {
-            // Use cached data if available, otherwise create from Firebase
-            const userData = getUserFromStorage() || createUserFromFirebase(firebaseUser);
+            // Create user data from Firebase
+            const userData = createUserFromFirebase(firebaseUser);
             setUser(userData);
             updateUserCache(userData);
+            
+            // Save to localStorage for persistence
+            try {
+              localStorage.setItem('user', JSON.stringify(userData));
+            } catch {}
           } else {
-            if (process.env.NODE_ENV === 'development') {
-              console.log('User logged out, clearing data');
-            }
+            // Only clear user if we're sure they're logged out
             setUser(null);
             updateUserCache(null);
             
             // Clear localStorage asynchronously to avoid blocking
-            requestIdleCallback(() => {
-              localStorage.removeItem('user');
-              localStorage.removeItem('token');
-            });
+            if (typeof requestIdleCallback !== 'undefined') {
+              requestIdleCallback(() => {
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+              });
+            } else {
+              setTimeout(() => {
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+              }, 0);
+            }
           }
           
           setLoading(false);
           setInitialized(true);
         });
       } catch (error) {
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Auth initialization error:', error);
-        }
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
@@ -138,7 +150,7 @@ export function useAuth() {
         clearTimeout(timeoutRef.current);
       }
     };
-  }, [getUserFromStorage, createUserFromFirebase, updateUserCache]);
+  }, [createUserFromFirebase, updateUserCache]);
 
   const signOut = useCallback(async () => {
     try {
@@ -147,14 +159,19 @@ export function useAuth() {
       updateUserCache(null);
       
       // Clear localStorage asynchronously to avoid blocking
-      requestIdleCallback(() => {
-        localStorage.removeItem('user');
-        localStorage.removeItem('token');
-      });
-    } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('Error signing out:', error);
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(() => {
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
+        });
+      } else {
+        setTimeout(() => {
+          localStorage.removeItem('user');
+          localStorage.removeItem('token');
+        }, 0);
       }
+    } catch (error) {
+      // Silent fail in production
     }
   }, [updateUserCache]);
 

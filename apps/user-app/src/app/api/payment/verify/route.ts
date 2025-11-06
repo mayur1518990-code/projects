@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { getCacheKey, setCached } from '@/lib/cache';
 import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
@@ -94,6 +95,13 @@ export async function POST(request: NextRequest) {
       status: 'paid',
       updatedAt: new Date().toISOString(),
     });
+
+    // CRITICAL FIX: Clear the cache for this user's files and single file
+    // This ensures the updated payment status is immediately reflected
+    const cacheKey = getCacheKey('user_files', userId);
+    const singleFileCacheKey = getCacheKey('single_file', `${userId}_${fileId}`);
+    setCached(cacheKey, null, 0);
+    setCached(singleFileCacheKey, null, 0);
 
     if (isFormPost) {
       return NextResponse.redirect(new URL('/files?payment=success', url.origin), 303);

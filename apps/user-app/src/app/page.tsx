@@ -1,17 +1,125 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/components/AuthProvider";
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
+import { getAlertStyles, getAlertIcon } from "@/lib/fileUtils";
+
+interface Alert {
+  id: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'error';
+  createdAt: string;
+}
 
 export default function Home() {
+  const router = useRouter();
   const { user, loading } = useAuthContext();
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
+  
+  // Prevent hydration mismatch by only showing user-specific content after mount
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
   
   // Memoize the login button visibility to prevent unnecessary re-renders
   const showLoginButton = useMemo(() => !loading && !user, [loading, user]);
   
+  // Fetch active alerts with debouncing and smart caching
+  useEffect(() => {
+    let lastFetchTime = 0;
+    let debounceTimer: NodeJS.Timeout;
+    const DEBOUNCE_MS = 1000; // 1 second debounce
+    const CACHE_MS = 5 * 60 * 1000; // 5 minutes cache
+    
+    const fetchAlerts = async () => {
+      const now = Date.now();
+      
+      // Skip if we fetched recently (within cache period)
+      if (now - lastFetchTime < CACHE_MS) {
+        return;
+      }
+      
+      try {
+        const response = await fetch("/api/alerts");
+        if (response.ok) {
+          const data = await response.json();
+          setAlerts(data.alerts || []);
+          lastFetchTime = now;
+        }
+      } catch (error) {
+        // Silent in production
+      }
+    };
+    
+    // Initial fetch
+    fetchAlerts();
+    
+    // Debounced focus handler
+    const handleFocus = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fetchAlerts, DEBOUNCE_MS);
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      clearTimeout(debounceTimer);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+  
+  // Memoize callback to prevent recreation
+  const handleDismissAlert = useCallback((id: string) => {
+    setDismissedAlerts(prev => [...prev, id]);
+  }, []);
+  
+  // Memoize filtered alerts to prevent recalculation
+  const visibleAlerts = useMemo(() => 
+    alerts.filter(alert => !dismissedAlerts.includes(alert.id)),
+    [alerts, dismissedAlerts]
+  );
+  
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Alert Banners - Fixed below navbar */}
+      {visibleAlerts.length > 0 && (
+        <div className="fixed top-12 sm:top-14 md:top-16 left-0 right-0 bg-white border-b shadow-md z-40">
+          <div className="container mx-auto px-3 sm:px-4">
+            {visibleAlerts.map((alert) => (
+              <div
+                key={alert.id}
+                className={`border-l-4 p-4 my-2 rounded ${getAlertStyles(alert.type)}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span className="text-2xl flex-shrink-0">{getAlertIcon(alert.type)}</span>
+                    <div className="scroll-container flex-1 min-w-0">
+                      <p className="scroll-text text-sm sm:text-base font-medium">
+                        {alert.message}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDismissAlert(alert.id)}
+                    className="ml-4 text-xl hover:opacity-70 transition-opacity flex-shrink-0"
+                    aria-label="Dismiss alert"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Spacer for navbar + fixed alert */}
+      {visibleAlerts.length > 0 && (
+        <div className="h-12 sm:h-14 md:h-16" />
+      )}
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-blue-600 to-blue-800 text-white">
         <div className="container mx-auto px-3 sm:px-4 py-12 sm:py-16 md:py-20">
@@ -23,12 +131,12 @@ export default function Home() {
               Upload, process, and share your documents with QR code tracking and secure payment integration
             </p>
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-2 sm:px-0">
-              <Link
-                href="/upload"
-                className="bg-white text-blue-600 px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-gray-100 transition-colors w-full sm:w-auto"
+              <button
+                onClick={() => router.push('/upload')}
+                className="bg-white text-blue-600 px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-gray-100 transition-colors w-full sm:w-auto cursor-pointer"
               >
                 Start Uploading
-              </Link>
+              </button>
               {showLoginButton && (
                 <Link
                   href="/login"
@@ -148,8 +256,8 @@ export default function Home() {
       <section className="bg-gray-900 text-white py-12 sm:py-16 md:py-20">
         <div className="container mx-auto px-3 sm:px-4">
           <div className="max-w-4xl mx-auto text-center">
-            {user ? (
-              // Show different content when user is logged in
+            {isMounted && user ? (
+              // Show different content when user is logged in (only after client hydration)
               <>
                 <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">
                   Welcome back, {user.name}!
@@ -158,22 +266,22 @@ export default function Home() {
                   Ready to upload and process your documents? Your files are waiting.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-2 sm:px-0">
-                  <Link
-                    href="/upload"
-                    className="bg-blue-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
+                  <button
+                    onClick={() => router.push('/upload')}
+                    className="bg-blue-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-blue-700 transition-colors w-full sm:w-auto cursor-pointer"
                   >
                     Upload Files
-                  </Link>
-                  <Link
-                    href="/files"
-                    className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto"
+                  </button>
+                  <button
+                    onClick={() => router.push('/files')}
+                    className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto cursor-pointer"
                   >
                     View My Files
-                  </Link>
+                  </button>
                 </div>
               </>
             ) : (
-              // Show signup content when user is not logged in
+              // Show signup content when user is not logged in or during SSR
               <>
                 <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">
                   Ready to Get Started?
@@ -188,12 +296,12 @@ export default function Home() {
                   >
                     Create Account
                   </Link>
-                  <Link
-                    href="/upload"
-                    className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto"
+                  <button
+                    onClick={() => router.push('/upload')}
+                    className="border-2 border-white text-white px-6 sm:px-8 py-3 sm:py-4 rounded-lg font-semibold text-base sm:text-lg hover:bg-white hover:text-gray-900 transition-colors w-full sm:w-auto cursor-pointer"
                   >
                     Try Now
-                  </Link>
+                  </button>
                 </div>
               </>
             )}

@@ -14,20 +14,10 @@ interface CreatePaymentData {
 
 export async function POST(request: NextRequest) {
   try {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Create payment order API called');
-    }
     const body = await request.json();
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Request body:', body);
-    }
-    
     const { fileId, userId, amount } = body;
 
     if (!fileId || !userId || !amount) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('Missing required fields:', { fileId, userId, amount });
-      }
       return NextResponse.json(
         { success: false, message: 'File ID, User ID, and amount are required' },
         { status: 400 }
@@ -35,15 +25,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify the file belongs to the user
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Checking file ownership for fileId:', fileId, 'userId:', userId);
-    }
     const fileDoc = await adminDb.collection('files').doc(fileId).get();
     
     if (!fileDoc.exists) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('File not found:', fileId);
-      }
       return NextResponse.json(
         { success: false, message: 'File not found' },
         { status: 404 }
@@ -51,14 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     const fileData = fileDoc.data();
-    if (process.env.NODE_ENV === 'development') {
-      console.log('File data:', fileData);
-    }
-    
     if (fileData?.userId !== userId) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('Unauthorized access:', { fileUserId: fileData?.userId, requestUserId: userId });
-      }
       return NextResponse.json(
         { success: false, message: 'Unauthorized to create payment for this file' },
         { status: 403 }
@@ -75,91 +52,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const createOrderPayload = {
-      amount: Math.round(Number(amount) * 100), // paise
-      currency: 'INR',
-      receipt: `file_${fileId}_${Date.now()}`,
-      payment_capture: 1
-    } as any;
-
+    const amountInPaise = Math.round(Number(amount) * 100);
+    
+    // Create Razorpay order with timeout
     const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
-    const rpRes = await fetch('https://api.razorpay.com/v1/orders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${auth}`
-      },
-      body: JSON.stringify(createOrderPayload)
-    });
-    if (!rpRes.ok) {
-      const txt = await rpRes.text();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout for faster response
+    
+    let rpOrder;
+    try {
+      const rpRes = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${auth}`
+        },
+        body: JSON.stringify({
+          amount: amountInPaise,
+          currency: 'INR',
+          receipt: `file_${fileId}_${Date.now()}`,
+          payment_capture: 1
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (!rpRes.ok) {
+        const errorText = await rpRes.text();
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Razorpay API error:', rpRes.status, errorText);
+        }
+        return NextResponse.json(
+          { success: false, message: 'Failed to create Razorpay order' },
+          { status: 502 }
+        );
+      }
+      rpOrder = await rpRes.json();
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Razorpay fetch error:', err.message);
+      }
       return NextResponse.json(
-        { success: false, message: `Failed to create Razorpay order: ${rpRes.status} ${txt}` },
-        { status: 502 }
+        { success: false, message: err.name === 'AbortError' ? 'Razorpay API timeout' : 'Razorpay API error' },
+        { status: 504 }
       );
     }
-    const rpOrder = await rpRes.json();
+    
     const orderId = rpOrder.id as string;
 
-    // Create payment record in Firestore
-    const paymentData: CreatePaymentData = {
+    // Create payment record in Firestore (minimal data for speed)
+    const paymentRef = adminDb.collection('payments').doc();
+    const paymentId = paymentRef.id;
+    const now = new Date().toISOString();
+
+    await paymentRef.set({
+      id: paymentId,
       fileId,
       userId,
-      amount: amount, // Store original amount in rupees
+      amount,
       currency: 'INR',
       razorpayOrderId: orderId,
       paymentMethod: 'razorpay',
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
       metadata: {
         userAgent: request.headers.get('user-agent'),
         ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip'),
       }
-    };
-
-    const paymentRef = adminDb.collection('payments').doc();
-    const paymentId = paymentRef.id;
-
-    const paymentDocument = {
-      id: paymentId,
-      ...paymentData,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (process.env.NODE_ENV === 'development') {
-
-      console.log('Creating payment document:', paymentDocument);
-
-    }
-    await paymentRef.set(paymentDocument);
-
-    if (process.env.NODE_ENV === 'development') {
-
-      console.log('Payment order created successfully:', {
-      paymentId,
-      fileId,
-      userId,
-      amount: paymentData.amount,
-      orderId,
-      status: 'pending'
     });
 
-    }
-
-    const response = {
+    return NextResponse.json({
       success: true,
       order_id: orderId,
       payment_id: paymentId,
-      amount: Math.round(Number(amount) * 100), // paise
+      amount: amountInPaise,
       currency: 'INR'
-    };
-
-    if (process.env.NODE_ENV === 'development') {
-
-      console.log('Returning response:', response);
-
-    }
-    return NextResponse.json(response);
+    });
 
   } catch (error: any) {
     if (process.env.NODE_ENV === 'development') {
