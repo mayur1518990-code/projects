@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Upload file to Backblaze B2 with timeout
-    let uploadResult;
+    let uploadResult: any;
     try {
       // Add timeout wrapper for B2 upload (reduced to 8s for better responsiveness)
       const uploadPromise = uploadFile(fileBuffer, filePath, mimeType);

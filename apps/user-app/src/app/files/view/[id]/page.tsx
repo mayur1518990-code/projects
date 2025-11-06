@@ -271,7 +271,7 @@ export default function ViewDocumentPage() {
         </a>
       </div>
     );
-  }, [file, fileContent, getFileIcon]);
+  }, [file, fileContent, getFileIconLarge]);
 
   // Show loading if checking authentication
   if (authLoading) {
