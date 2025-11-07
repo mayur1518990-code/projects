@@ -532,6 +532,13 @@ export default function FilesPage() {
         // The optimistic update already removed it from UI
       }, { timeout: 500 });
 
+      // Force refresh to ensure the deleted file doesn't reappear from caches
+      setTimeout(() => {
+        if (!isLoadingFilesRef.current) {
+          loadFiles(true).catch(() => {});
+        }
+      }, 100);
+
     } catch (error: any) {
       // Revert optimistic update on error
       setFiles(originalFiles);
