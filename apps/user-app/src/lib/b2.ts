@@ -78,6 +78,11 @@ export async function uploadFile(
     throw new Error('B2 credentials are not configured. Please set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY environment variables.');
   }
 
+  // Validate buffer
+  if (!buffer || buffer.length === 0) {
+    throw new Error('Empty file buffer');
+  }
+
   const params: AWS.S3.PutObjectRequest = {
     Bucket: B2_BUCKET_NAME,
     Key: key,
@@ -87,12 +92,20 @@ export async function uploadFile(
   };
 
   try {
-    // Use retry logic for upload reliability
+    // Use retry logic for upload reliability with longer retries for large files
+    const startTime = Date.now();
     const result = await retryWithBackoff(
       () => s3.upload(params).promise(),
-      3, // 3 retries
-      300 // 300ms base delay
+      2, // Reduced to 2 retries for faster failure (was 3)
+      500 // Increased base delay to 500ms for better reliability
     );
+    
+    const uploadTime = Date.now() - startTime;
+    
+    // Log slow uploads for monitoring
+    if (uploadTime > 5000) {
+      console.warn(`Slow B2 upload detected: ${uploadTime}ms for ${(buffer.length / 1024 / 1024).toFixed(2)}MB`);
+    }
     
     // Construct the public URL
     const url = result.Location || `${B2_ENDPOINT}/${B2_BUCKET_NAME}/${key}`;
@@ -103,8 +116,24 @@ export async function uploadFile(
       bucket: result.Bucket || B2_BUCKET_NAME,
     };
   } catch (error: any) {
-    console.error('B2 upload error:', error);
-    throw new Error(`Failed to upload file to B2: ${error.message}`);
+    console.error('B2 upload error:', {
+      message: error.message,
+      code: error.code,
+      statusCode: error.statusCode,
+      key,
+      size: buffer.length
+    });
+    
+    // Provide more specific error messages
+    if (error.code === 'NetworkingError' || error.code === 'ECONNREFUSED') {
+      throw new Error('Network error connecting to storage. Please check your internet connection.');
+    } else if (error.code === 'RequestTimeout') {
+      throw new Error('Storage connection timeout. File may be too large.');
+    } else if (error.statusCode === 403) {
+      throw new Error('Storage authentication failed. Please contact support.');
+    } else {
+      throw new Error(`Storage upload failed: ${error.message || 'Unknown error'}`);
+    }
   }
 }
 

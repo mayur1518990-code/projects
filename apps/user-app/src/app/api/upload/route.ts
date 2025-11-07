@@ -124,12 +124,16 @@ const generateUniqueFilename = (originalName: string): string => {
 };
 
 export async function POST(request: NextRequest) {
+  const requestStartTime = Date.now();
+  
   try {
     // Handle FormData instead of JSON
     const formData = await request.formData();
     const file = formData.get('file') as globalThis.File;
     const userId = formData.get('userId') as string;
     const metadataStr = formData.get('metadata') as string;
+    
+    console.log(`[Upload] Request received in ${Date.now() - requestStartTime}ms`);
     
     if (!file || !userId) {
       return NextResponse.json(
@@ -187,8 +191,10 @@ export async function POST(request: NextRequest) {
     let fileBuffer: Buffer;
     
     try {
+      const bufferStartTime = Date.now();
       const arrayBuffer = await file.arrayBuffer();
       fileBuffer = Buffer.from(arrayBuffer);
+      console.log(`[Upload] Buffer conversion in ${Date.now() - bufferStartTime}ms`);
       
       // Validate buffer has content
       if (fileBuffer.length === 0) {
@@ -207,24 +213,59 @@ export async function POST(request: NextRequest) {
     // Upload file to Backblaze B2 with timeout
     let uploadResult: any;
     try {
-      // Add timeout wrapper for B2 upload (reduced to 8s for better responsiveness)
+      // Log upload start
+      const uploadStartTime = Date.now();
+      console.log(`Starting B2 upload: ${originalName} (${(size / 1024 / 1024).toFixed(2)}MB)`);
+      
+      // Increased timeout to 30s for slow connections (network issues observed)
       const uploadPromise = uploadFile(fileBuffer, filePath, mimeType);
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Upload timeout')), 8000) // 8s timeout
+        setTimeout(() => reject(new Error('Upload timeout after 30 seconds')), 30000) // 30s timeout
       );
       
       uploadResult = await Promise.race([uploadPromise, timeoutPromise]);
+      
+      const uploadTime = Date.now() - uploadStartTime;
+      console.log(`B2 upload completed: ${originalName} in ${uploadTime}ms`);
+      
+      if (!uploadResult || !uploadResult.url) {
+        throw new Error('Invalid upload response from storage');
+      }
     } catch (uploadError: any) {
+      // Log detailed error for debugging
+      console.error('B2 upload failed:', {
+        error: uploadError.message,
+        fileName: originalName,
+        fileSize: size,
+        mimeType,
+        stack: uploadError.stack
+      });
+      
+      // Return user-friendly error with specific hints
+      let errorMessage = 'Upload failed. Please try again.';
+      
+      if (uploadError.message.includes('timeout')) {
+        errorMessage = 'Upload timeout after 30 seconds. Your connection may be slow. Please try again or use a faster internet connection.';
+      } else if (uploadError.message.includes('Network error') || uploadError.message.includes('ECONNREFUSED')) {
+        errorMessage = 'Network connection failed. Please check your internet and try again.';
+      } else if (uploadError.message.includes('credentials') || uploadError.message.includes('authentication')) {
+        errorMessage = 'Storage configuration error. Please contact support.';
+      } else {
+        errorMessage = `Upload failed: ${uploadError.message}`;
+      }
+        
       return NextResponse.json(
-        { success: false, message: uploadError.message === 'Upload timeout' ? 'Upload timeout. Please try again.' : 'Failed to upload file to storage.' },
+        { success: false, message: errorMessage },
         { status: 500 }
       );
     }
 
     // Create file document in Firestore with metadata only
+    const firestoreStartTime = Date.now();
     const fileRef = adminDb.collection('files').doc();
     const fileId = fileRef.id;
 
+    const timestamp = new Date().toISOString();
     const fileDocument = {
       id: fileId,
       userId,
@@ -234,19 +275,24 @@ export async function POST(request: NextRequest) {
       mimeType,
       filePath,
       fileUrl: uploadResult.url,
-      status: 'pending_payment', // Initial status - waiting for payment
-      uploadedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+      status: 'pending_payment',
+      uploadedAt: timestamp,
+      createdAt: timestamp,
       metadata: metadata || {}
     };
 
     try {
-      await fileRef.set(fileDocument);
+      // Start Firestore write
+      const firestorePromise = fileRef.set(fileDocument);
       
-      // Clear user's file cache immediately so new file shows up
-      const { getCacheKey, setCached } = await import('@/lib/cache');
-      const cacheKey = getCacheKey('user_files', userId);
-      setCached(cacheKey, null, 0);
+      // Clear cache asynchronously (don't block)
+      import('@/lib/cache').then(({ getCacheKey, setCached }) => {
+        const cacheKey = getCacheKey('user_files', userId);
+        setCached(cacheKey, null, 0);
+      }).catch(() => {});
+      
+      await firestorePromise;
+      console.log(`[Upload] Firestore write in ${Date.now() - firestoreStartTime}ms`);
     } catch (firestoreError: any) {
       // If Firestore write fails, try to clean up B2 file
       try {
@@ -261,6 +307,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const totalTime = Date.now() - requestStartTime;
+    console.log(`[Upload] Total request time: ${totalTime}ms`);
+    
     return NextResponse.json({
       success: true,
       message: 'File uploaded successfully',
@@ -277,17 +326,31 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Upload error:', error);
-    }
+    // Log detailed error for debugging
+    console.error('Upload route error:', {
+      message: error.message,
+      code: error.code,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
     
     let statusCode = 500;
-    if (error.code === 'permission-denied') statusCode = 403;
-    else if (error.code === 'invalid-argument') statusCode = 400;
-    else if (error.code === 'resource-exhausted') statusCode = 413;
+    let errorMessage = 'An error occurred during upload';
+    
+    if (error.code === 'permission-denied') {
+      statusCode = 403;
+      errorMessage = 'Permission denied. Please check your credentials.';
+    } else if (error.code === 'invalid-argument') {
+      statusCode = 400;
+      errorMessage = 'Invalid file data. Please try again.';
+    } else if (error.code === 'resource-exhausted') {
+      statusCode = 413;
+      errorMessage = 'File too large. Maximum size is 20MB.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
     
     return NextResponse.json(
-      { success: false, message: 'An error occurred during upload' },
+      { success: false, message: errorMessage },
       { status: statusCode }
     );
   }

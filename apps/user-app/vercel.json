@@ -4,9 +4,13 @@
   "framework": "nextjs",
   "regions": ["bom1"],
   "functions": {
+    "src/app/api/upload/route.ts": {
+      "memory": 1024,
+      "maxDuration": 35
+    },
     "src/app/api/**/*.ts": {
       "memory": 1024,
-      "maxDuration": 5
+      "maxDuration": 10
     }
   },
   "headers": [
