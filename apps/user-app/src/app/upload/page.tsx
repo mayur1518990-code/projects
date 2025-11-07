@@ -34,58 +34,79 @@ export default function UploadPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
 
-  // Fetch alerts ONCE per session - no auto-refresh
+  // Fetch alerts ONCE per session - non-blocking (don't delay page render)
   useEffect(() => {
     let cleanup: (() => void) | undefined;
+    let mounted = true;
     
+    // Load alerts in background - don't block page render
     const init = async () => {
-      // Import alert cache utilities
-      const cache = await import('@/lib/alertCache');
-      
-      const fetchAlerts = async () => {
-        // Check localStorage cache first
+      try {
+        // Import alert cache utilities (non-blocking)
+        const cache = await import('@/lib/alertCache');
+        
+        // Check localStorage cache first (instant)
         const cached = cache.getCachedAlerts();
-        if (cached) {
+        if (cached && mounted) {
           setAlerts(cached);
-          return;
         }
         
-        // Try to acquire lock - only one tab should fetch
-        if (!cache.acquireFetchLock()) {
-          // Another tab is fetching, wait for storage event
-          return;
-        }
+        const fetchAlerts = async () => {
+          // Check cache again (might have been set by another tab)
+          const cached = cache.getCachedAlerts();
+          if (cached && mounted) {
+            setAlerts(cached);
+            return;
+          }
+          
+          // Try to acquire lock - only one tab should fetch
+          if (!cache.acquireFetchLock()) {
+            // Another tab is fetching, wait for storage event
+            return;
+          }
+          
+          try {
+            const response = await fetch('/api/alerts');
+            if (response.ok && mounted) {
+              const data = await response.json();
+              const alertsData = data.alerts || [];
+              setAlerts(alertsData);
+              // Cache for all tabs to use (valid for 24 hours)
+              cache.setCachedAlerts(alertsData);
+            }
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error("Error fetching alerts:", error);
+            }
+          } finally {
+            cache.releaseFetchLock();
+          }
+        };
         
-        try {
-          const response = await fetch('/api/alerts');
-          if (response.ok) {
-            const data = await response.json();
-            const alertsData = data.alerts || [];
-            setAlerts(alertsData);
-            // Cache for all tabs to use (valid for 24 hours)
-            cache.setCachedAlerts(alertsData);
-          }
-        } catch (error) {
-          if (process.env.NODE_ENV === 'development') {
-            console.error("Error fetching alerts:", error);
-          }
-        } finally {
-          cache.releaseFetchLock();
+        // Fetch in background (non-blocking)
+        fetchAlerts();
+        
+        // Listen for updates from other tabs (in case they fetch)
+        if (mounted) {
+          cleanup = cache.setupAlertSync((alerts: any[]) => {
+            if (mounted) {
+              setAlerts(alerts);
+            }
+          });
         }
-      };
-      
-      // Fetch ONCE on mount only
-      await fetchAlerts();
-      
-      // Listen for updates from other tabs (in case they fetch)
-      cleanup = cache.setupAlertSync((alerts: any[]) => {
-        setAlerts(alerts);
-      });
+      } catch (error) {
+        // Silent fail - alerts are not critical for page load
+        if (process.env.NODE_ENV === 'development') {
+          console.error("Error initializing alerts:", error);
+        }
+      }
     };
     
+    // Don't await - let page render immediately
     init();
     
     return () => {
+      mounted = false;
       cleanup?.();
     };
   }, []);
@@ -94,18 +115,18 @@ export default function UploadPage() {
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
     
-    // Set a timeout to prevent infinite loading
+    // Set a timeout to prevent infinite loading (reduced from 3s to 2s)
     const authTimeoutId = setTimeout(() => {
       if (loading) {
         setAuthTimeout(true);
       }
-    }, 3000); // 3 second timeout for auth loading
+    }, 2000); // 2 second timeout for faster page load
 
-    // Redirect to login if not authenticated
+    // Redirect to login if not authenticated (reduced delay)
     if (!loading && !user) {
       timeoutId = setTimeout(() => {
         window.location.href = '/login';
-      }, 1000); // 1 second delay for better UX
+      }, 500); // Reduced from 1s to 500ms for faster redirect
     }
 
     return () => {
@@ -288,6 +309,7 @@ export default function UploadPage() {
   const memoizedUploadedFiles = useMemo(() => uploadedFiles, [uploadedFiles]);
 
   // Show loading if checking authentication (with timeout protection)
+  // Reduced timeout to show page faster
   if (loading && !authTimeout) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -298,6 +320,9 @@ export default function UploadPage() {
       </div>
     );
   }
+  
+  // Show page immediately even if auth is still loading (after timeout)
+  // This prevents blocking the page render
 
   // Show login prompt if not authenticated
   if (!user) {

@@ -52,7 +52,17 @@ interface FileData {
 
 export default function FilesPage() {
   const { user, loading: authLoading } = useAuthContext();
-  const [files, setFiles] = useState<FileData[]>([]);
+  
+  // Initialize with cached data if available (instant render)
+  const [files, setFiles] = useState<FileData[]>(() => {
+    try {
+      // Try to get cached files from ref (will be set after first load)
+      // For now, start empty but will populate immediately if cache exists
+      return [];
+    } catch {
+      return [];
+    }
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "pending_payment" | "paid" | "processing" | "completed">("all");
   const [error, setError] = useState("");
@@ -106,10 +116,11 @@ export default function FilesPage() {
     }
     
     // Simple cache - only use cached data if not forcing refresh and data exists
-    // No time-based expiry - only refresh on page load or manual refresh
+    // Show cached data immediately for instant render
     if (!shouldForceRefresh && filesDataRef.current.length > 0) {
       setFiles(filesDataRef.current);
       setIsLoading(false);
+      // Don't fetch in background here - let the useEffect handle it
       return;
     }
     
@@ -283,15 +294,18 @@ export default function FilesPage() {
       const isNewUser = lastUserIdRef.current !== user.userId;
       lastUserIdRef.current = user.userId;
       
-      // Check if there was a recent deletion - force refresh if yes
-      const timeSinceDelete = Date.now() - localStorageCache.lastDeleteTime;
-      const shouldForceRefresh = timeSinceDelete < 30000;
-      
-      if (isNewUser || shouldForceRefresh) {
-        loadFiles(shouldForceRefresh);
+      // Show cached data immediately for instant render
+      if (filesDataRef.current.length > 0 && !isNewUser) {
+        setFiles(filesDataRef.current);
+        setIsLoading(false);
+        // Then fetch fresh data in background (non-blocking)
+        setTimeout(() => loadFiles(false), 100);
+      } else if (isNewUser) {
+        // New user - fetch immediately
+        loadFiles(false);
       }
     }
-  }, [user, authLoading, loadFiles, localStorageCache.lastDeleteTime]);
+  }, [user, authLoading, loadFiles]);
 
   // Add timeout for auth loading to prevent infinite loading
   useEffect(() => {
@@ -299,19 +313,20 @@ export default function FilesPage() {
       if (authLoading) {
         console.warn('Auth loading timeout - proceeding without user');
       }
-    }, 5000); // 5 second timeout for faster response
+    }, 2000); // Reduced to 2 seconds for faster page load
 
     return () => clearTimeout(timeout);
   }, [authLoading]);
 
   // No auto-refresh - only fetch on page load or manual refresh
 
-  // Fetch contact numbers on mount (only once)
+  // Fetch contact numbers on mount (only once) - non-blocking
   const contactFetchedRef = useRef(false);
   useEffect(() => {
     if (contactFetchedRef.current) return;
     contactFetchedRef.current = true;
 
+    // Fetch in background - don't block page render
     const fetchContactNumbers = async () => {
       try {
         const response = await fetch('/api/contact-numbers');
@@ -322,10 +337,14 @@ export default function FilesPage() {
           }
         }
       } catch (error) {
-        console.error('Error fetching contact numbers:', error);
+        // Silent fail - contact numbers are not critical
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Error fetching contact numbers:', error);
+        }
       }
     };
 
+    // Don't await - fetch in background
     fetchContactNumbers();
   }, []);
 
@@ -509,14 +528,9 @@ export default function FilesPage() {
           }
         } catch {}
         
-        // Mark deletion timestamp to force cache bypass on next load
-        try {
-          localStorage.setItem('lastFileDeleteTime', Date.now().toString());
-        } catch {}
+        // Don't set lastFileDeleteTime - it was causing unwanted refreshes
+        // The optimistic update already removed it from UI
       }, { timeout: 500 });
-      
-      // Clear cache timestamp to force fresh fetch next time
-      lastFetchTimeRef.current = 0;
 
     } catch (error: any) {
       // Revert optimistic update on error
@@ -855,7 +869,12 @@ export default function FilesPage() {
                         )}
                         
                         <button 
-                          onClick={() => handleDeleteFile(file.id)}
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleDeleteFile(file.id);
+                          }}
                           className="inline-flex items-center px-3 sm:px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
