@@ -639,36 +639,6 @@ export default function FilesPage() {
     };
   }, [user, loadFiles]);
 
-  useEffect(() => {
-    if (!user || !hasActiveFiles) return;
-
-    const refresh = () => {
-      if (!isLoadingFilesRef.current) {
-        loadFiles(true).catch(() => {});
-      }
-    };
-
-    const handleVisibility = () => {
-      if (!document.hidden) {
-        refresh();
-      }
-    };
-
-    const interval = setInterval(() => {
-      if (document.hidden) return;
-      refresh();
-    }, 8000); // Refresh every 8 seconds when active files exist
-
-    document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('focus', handleVisibility);
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', handleVisibility);
-    };
-  }, [user, hasActiveFiles, loadFiles]);
-
   // Show loading if checking authentication
   if (authLoading) {
     return (
