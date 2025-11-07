@@ -598,7 +598,23 @@ export default function FilesPage() {
     }
   }, [user, downloadingFiles]);
 
+  useEffect(() => {
+    if (!user) return;
 
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'newFileUploaded' && !isLoadingFilesRef.current) {
+        // Clear the key so future uploads can trigger again
+        localStorage.removeItem('newFileUploaded');
+        loadFiles(true).catch(() => {});
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [user, loadFiles]);
 
   // Show loading if checking authentication
   if (authLoading) {
