@@ -9,10 +9,10 @@ export async function GET() {
     const cacheKey = 'active_alerts';
     const cached = getCached(cacheKey);
     if (cached) {
-      // Return cached response with HTTP cache headers
+      // Return cached response with shorter HTTP cache headers
       return NextResponse.json(cached, {
         headers: {
-          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       });
     }
@@ -54,13 +54,13 @@ export async function GET() {
 
     const result = { alerts };
     
-    // Cache for 5 minutes (300000ms) since alerts don't change frequently
-    setCached(cacheKey, result, 300000);
+    // Cache for 30 seconds only - alerts can be deleted/updated by admin
+    setCached(cacheKey, result, 30000);
 
-    // Return with HTTP cache headers for CDN/browser caching
+    // Return with shorter HTTP cache headers for faster updates
     return NextResponse.json(result, {
       headers: {
-        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
       },
     });
   } catch (error) {

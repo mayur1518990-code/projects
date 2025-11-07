@@ -28,47 +28,57 @@ export default function Home() {
   // Memoize the login button visibility to prevent unnecessary re-renders
   const showLoginButton = useMemo(() => !loading && !user, [loading, user]);
   
-  // Fetch active alerts with debouncing and smart caching
+  // Fetch alerts ONCE per session - no auto-refresh
   useEffect(() => {
-    let lastFetchTime = 0;
-    let debounceTimer: NodeJS.Timeout;
-    const DEBOUNCE_MS = 1000; // 1 second debounce
-    const CACHE_MS = 5 * 60 * 1000; // 5 minutes cache
+    let cleanup: (() => void) | undefined;
     
-    const fetchAlerts = async () => {
-      const now = Date.now();
+    const init = async () => {
+      // Import alert cache utilities
+      const cache = await import('@/lib/alertCache');
       
-      // Skip if we fetched recently (within cache period)
-      if (now - lastFetchTime < CACHE_MS) {
-        return;
-      }
-      
-      try {
-        const response = await fetch("/api/alerts");
-        if (response.ok) {
-          const data = await response.json();
-          setAlerts(data.alerts || []);
-          lastFetchTime = now;
+      const fetchAlerts = async () => {
+        // Check localStorage cache first
+        const cached = cache.getCachedAlerts();
+        if (cached) {
+          setAlerts(cached);
+          return;
         }
-      } catch (error) {
-        // Silent in production
-      }
+        
+        // Try to acquire lock - only one tab should fetch
+        if (!cache.acquireFetchLock()) {
+          // Another tab is fetching, wait for storage event
+          return;
+        }
+        
+        try {
+          const response = await fetch('/api/alerts');
+          if (response.ok) {
+            const data = await response.json();
+            const alertsData = data.alerts || [];
+            setAlerts(alertsData);
+            // Cache for all tabs to use (valid for 24 hours)
+            cache.setCachedAlerts(alertsData);
+          }
+        } catch (error) {
+          // Silent in production
+        } finally {
+          cache.releaseFetchLock();
+        }
+      };
+      
+      // Fetch ONCE on mount only
+      await fetchAlerts();
+      
+      // Listen for updates from other tabs (in case they fetch)
+      cleanup = cache.setupAlertSync((alerts: any[]) => {
+        setAlerts(alerts);
+      });
     };
     
-    // Initial fetch
-    fetchAlerts();
-    
-    // Debounced focus handler
-    const handleFocus = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(fetchAlerts, DEBOUNCE_MS);
-    };
-    
-    window.addEventListener('focus', handleFocus);
+    init();
     
     return () => {
-      clearTimeout(debounceTimer);
-      window.removeEventListener('focus', handleFocus);
+      cleanup?.();
     };
   }, []);
   
