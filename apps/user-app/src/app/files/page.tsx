@@ -526,18 +526,16 @@ export default function FilesPage() {
     }
   }, [user, files]);
 
-  const downloadCompletedFile = useCallback(async (completedFileId: string, filename: string, event?: React.MouseEvent) => {
+  const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
+
+  const downloadCompletedFile = useCallback(async (completedFileId: string, filename: string) => {
     if (!user) return;
     
-    // Prevent multiple clicks
-    if (event) {
-      event.preventDefault();
-      event.stopPropagation();
-      const button = event.currentTarget as HTMLButtonElement;
-      if (button.disabled) return;
-      button.disabled = true;
-      button.textContent = 'Downloading...';
-    }
+    // Prevent multiple clicks for the same file
+    if (downloadingFiles.has(completedFileId)) return;
+    
+    // Mark as downloading
+    setDownloadingFiles(prev => new Set(prev).add(completedFileId));
     
     try {
       setError(''); // Clear any previous errors
@@ -550,38 +548,34 @@ export default function FilesPage() {
         throw new Error(result.error || 'Failed to get download URL');
       }
       
-      // Use window.open for more reliable download
-      window.open(result.downloadUrl, '_blank');
+      // Use only anchor method for reliable, single download
+      const a = document.createElement('a');
+      a.href = result.downloadUrl;
+      a.download = result.filename || filename;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
       
-      // Alternative: If window.open is blocked, use anchor method
+      // Clean up
       setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = result.downloadUrl;
-        a.download = result.filename || filename;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => document.body.removeChild(a), 100);
+        document.body.removeChild(a);
       }, 100);
       
     } catch (error: any) {
       setError(error.message || 'Failed to download completed file. Please try again.');
     } finally {
-      // Re-enable button after download attempt
-      if (event) {
-        setTimeout(() => {
-          const button = event.currentTarget as HTMLButtonElement;
-          button.disabled = false;
-          button.innerHTML = `
-            <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Download Completed
-          `;
-        }, 1000);
-      }
+      // Re-enable button after 500ms
+      setTimeout(() => {
+        setDownloadingFiles(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(completedFileId);
+          return newSet;
+        });
+      }, 500);
     }
-  }, [user]);
+  }, [user, downloadingFiles]);
 
 
 
@@ -835,17 +829,28 @@ export default function FilesPage() {
                         
                         {file.status === "completed" && file.completedFileId && (
                           <button 
-                            onClick={(e) => downloadCompletedFile(
+                            onClick={() => downloadCompletedFile(
                               file.completedFileId || file.id, 
-                              file.name,
-                              e
+                              file.name
                             )}
+                            disabled={downloadingFiles.has(file.completedFileId || file.id)}
                             className="inline-flex items-center px-3 sm:px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            Download Completed
+                            {downloadingFiles.has(file.completedFileId || file.id) ? (
+                              <>
+                                <svg className="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Downloading...
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Download Completed
+                              </>
+                            )}
                           </button>
                         )}
                         
