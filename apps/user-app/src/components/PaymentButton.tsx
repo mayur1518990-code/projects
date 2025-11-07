@@ -267,7 +267,10 @@ export function PaymentButton({ amount, fileId, onSuccess, onError }: PaymentBut
           amount: String(amount)
         }).toString();
         options.redirect = true;
-        options.callback_url = `https://projects-user-app-rnhd.vercel.app/api/payment/verify?${query}`;
+        const baseUrl =
+          process.env.NEXT_PUBLIC_APP_URL ||
+          (typeof window !== 'undefined' ? window.location.origin : '');
+        options.callback_url = `${baseUrl}/api/payment/verify?${query}`;
       }
 
       if (process.env.NODE_ENV === 'development') {
