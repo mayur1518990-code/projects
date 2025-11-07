@@ -134,12 +134,12 @@ export default function FilesPage() {
       abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 8000); // Reduced to 8s for faster response
       
-      // Add cache-busting parameter if force refresh to bypass any caching layers
-      const cacheBuster = shouldForceRefresh ? `&_t=${Date.now()}` : '';
-      
+      // Add cache-busting parameter to bypass any caching layers
+      const url = `/api/files?userId=${user.userId}&_t=${Date.now()}`;
+
       let response;
       try {
-        response = await fetch(`/api/files?userId=${user.userId}${cacheBuster}`, {
+        response = await fetch(url, {
           signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
@@ -375,6 +375,10 @@ export default function FilesPage() {
     completed: files.filter(f => f.status === "completed").length
   }), [files]);
 
+  const hasActiveFiles = useMemo(() =>
+    files.some(f => f.status === "pending_payment" || f.status === "paid" || f.status === "processing"),
+  [files]);
+
   const handlePaymentSuccess = useCallback((fileId: string) => {
     // Update local state immediately for better UX
     setFiles(prev => 
@@ -532,6 +536,10 @@ export default function FilesPage() {
         // The optimistic update already removed it from UI
       }, { timeout: 500 });
 
+      try {
+        localStorage.setItem('fileDeleted', JSON.stringify({ id: fileId, timestamp: Date.now() }));
+      } catch {}
+
       // Force refresh to ensure the deleted file doesn't reappear from caches
       setTimeout(() => {
         if (!isLoadingFilesRef.current) {
@@ -602,10 +610,25 @@ export default function FilesPage() {
     if (!user) return;
 
     const handleStorage = (event: StorageEvent) => {
+      if (!event.key) return;
+
       if (event.key === 'newFileUploaded' && !isLoadingFilesRef.current) {
-        // Clear the key so future uploads can trigger again
         localStorage.removeItem('newFileUploaded');
         loadFiles(true).catch(() => {});
+      }
+
+      if (event.key === 'fileDeleted') {
+        try {
+          const data = event.newValue ? JSON.parse(event.newValue) : null;
+          if (data?.id) {
+            // Remove deleted file immediately from state
+            setFiles(prev => prev.filter(file => file.id !== data.id));
+            filesDataRef.current = filesDataRef.current.filter(file => file.id !== data.id);
+            if (!isLoadingFilesRef.current) {
+              loadFiles(true).catch(() => {});
+            }
+          }
+        } catch {}
       }
     };
 
@@ -615,6 +638,36 @@ export default function FilesPage() {
       window.removeEventListener('storage', handleStorage);
     };
   }, [user, loadFiles]);
+
+  useEffect(() => {
+    if (!user || !hasActiveFiles) return;
+
+    const refresh = () => {
+      if (!isLoadingFilesRef.current) {
+        loadFiles(true).catch(() => {});
+      }
+    };
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        refresh();
+      }
+    };
+
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      refresh();
+    }, 8000); // Refresh every 8 seconds when active files exist
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
+  }, [user, hasActiveFiles, loadFiles]);
 
   // Show loading if checking authentication
   if (authLoading) {
