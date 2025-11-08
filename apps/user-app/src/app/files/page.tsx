@@ -329,13 +329,13 @@ export default function FilesPage() {
 
   // No auto-refresh - only fetch on page load or manual refresh
 
-  // Fetch contact numbers ONCE on load, then only update when admin makes changes
+  // Fetch contact numbers only on page load/refresh - no background polling
+  // Always fetch on page load to ensure cache exists, even if no processing files yet
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    let mounted = true;
+    let isMounted = true;
     
     const init = async () => {
-      // Check localStorage cache first (24 hour cache - data rarely changes)
+      // Load cached contact numbers immediately on mount (instant display)
       try {
         const cached = localStorage.getItem('contact_numbers_cache');
         if (cached) {
@@ -345,8 +345,8 @@ export default function FilesPage() {
           const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
           
           // Use cached data if still fresh
-          if (now - cacheTime < cacheDuration) {
-            if (cachedData.contactNumbers && cachedData.isActive && mounted) {
+          if (now - cacheTime < cacheDuration && cachedData.contactNumbers && cachedData.isActive) {
+            if (isMounted) {
               setContactNumbers(cachedData.contactNumbers);
             }
           }
@@ -356,25 +356,84 @@ export default function FilesPage() {
       }
 
       const fetchContactNumbers = async () => {
+        if (!isMounted) return;
+        
         try {
-          const response = await fetch('/api/contact-numbers');
-          if (response.ok && mounted) {
-            const data = await response.json();
-            if (data.success && data.isActive) {
-              setContactNumbers(data.contactNumbers || []);
-              
-              // Cache in localStorage for 24 hours (data rarely changes)
-              try {
-                localStorage.setItem('contact_numbers_cache', JSON.stringify({
-                  contactNumbers: data.contactNumbers || [],
-                  isActive: data.isActive,
-                  timestamp: Date.now()
-                }));
-              } catch (cacheError) {
-                // Ignore localStorage errors
+          // Check version first to see if cache is stale
+          const versionResponse = await fetch('/api/contact-numbers?version=true');
+          if (versionResponse.ok) {
+            const versionData = await versionResponse.json();
+            const newChecksum = versionData.checksum;
+            
+            // Check if cached checksum matches
+            let cachedChecksum: string | null = null;
+            try {
+              const cached = localStorage.getItem('contact_numbers_cache');
+              if (cached) {
+                const cachedData = JSON.parse(cached);
+                cachedChecksum = cachedData.checksum || null;
+              }
+            } catch {
+              // Ignore
+            }
+            
+            // Only fetch full contact numbers if checksum changed or no cache
+            if (!cachedChecksum || cachedChecksum !== newChecksum) {
+              const response = await fetch('/api/contact-numbers');
+              if (response.ok && isMounted) {
+                const data = await response.json();
+                if (data.success && data.isActive) {
+                  // Always cache contact numbers, even if no processing files yet
+                  // This ensures they're available when files become processing
+                  const contactNums = data.contactNumbers || [];
+                  
+                  // Always cache in localStorage with checksum
+                  try {
+                    localStorage.setItem('contact_numbers_cache', JSON.stringify({
+                      contactNumbers: contactNums,
+                      isActive: data.isActive,
+                      checksum: data.checksum,
+                      timestamp: Date.now()
+                    }));
+                  } catch (cacheError) {
+                    // Ignore localStorage errors
+                  }
+                  
+                  // Set state if there are processing files (check again after fetch)
+                  const hasProcessingFiles = files.some(f => f.status === 'processing');
+                  if (hasProcessingFiles && isMounted) {
+                    setContactNumbers(contactNums);
+                  }
+                } else {
+                  // Feature is inactive, clear cache
+                  if (isMounted) {
+                    setContactNumbers([]);
+                  }
+                  try {
+                    localStorage.removeItem('contact_numbers_cache');
+                  } catch {
+                    // Ignore
+                  }
+                }
               }
             } else {
-              setContactNumbers([]);
+              // Cache is still valid, no need to fetch
+              // Contact numbers already set from cache above if processing files exist
+              // But check again in case files loaded after cache was set
+              const hasProcessingFiles = files.some(f => f.status === 'processing');
+              if (hasProcessingFiles && isMounted) {
+                try {
+                  const cached = localStorage.getItem('contact_numbers_cache');
+                  if (cached) {
+                    const cachedData = JSON.parse(cached);
+                    if (cachedData.contactNumbers && cachedData.isActive) {
+                      setContactNumbers(cachedData.contactNumbers);
+                    }
+                  }
+                } catch {
+                  // Ignore
+                }
+              }
             }
           }
         } catch (error) {
@@ -385,47 +444,53 @@ export default function FilesPage() {
         }
       };
 
-      // Only fetch if cache is empty or expired
-      const cachedData = localStorage.getItem('contact_numbers_cache');
-      let shouldFetch = false;
-      let hasValidCache = false;
-      
-      if (!cachedData) {
-        shouldFetch = true;
-      } else {
-        try {
-          const parsed = JSON.parse(cachedData);
-          const cacheTime = parsed.timestamp || 0;
-          const now = Date.now();
-          const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
-          
-          if (now - cacheTime >= cacheDuration) {
-            shouldFetch = true;
-          } else if (parsed.contactNumbers && parsed.isActive) {
-            hasValidCache = true;
-          }
-        } catch {
-          shouldFetch = true;
-        }
-      }
-      
-      if (shouldFetch) {
-        // Initial fetch in background (non-blocking) - only if no cache
-        fetchContactNumbers();
-      }
-      
-      // Note: Firestore real-time listeners removed due to permission restrictions
-      // Cache works perfectly - contact numbers will update when cache expires (24 hours)
-      // or when user refreshes after admin makes changes
+      // Fetch contact numbers on page load/refresh
+      // Always fetch to ensure cache exists for when files become processing
+      // If cache exists, check version first (lightweight)
+      // If no cache, fetch full contact numbers
+      await fetchContactNumbers();
     };
-    
+
     init();
     
     return () => {
-      mounted = false;
-      cleanup?.();
+      isMounted = false;
     };
-  }, []); // Only run once on mount
+  }, []); // Only run on mount/refresh, not when files change
+
+  // Load cached contact numbers when files change to processing status
+  // This doesn't fetch from API, just loads from cache
+  useEffect(() => {
+    const hasProcessingFiles = files.some(f => f.status === 'processing');
+    
+    if (hasProcessingFiles) {
+      // Load from cache if available (no API call)
+      // Always try to load from cache when processing files exist
+      try {
+        const cached = localStorage.getItem('contact_numbers_cache');
+        if (cached) {
+          const cachedData = JSON.parse(cached);
+          const cacheTime = cachedData.timestamp || 0;
+          const now = Date.now();
+          const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
+          
+          // Use cached data if still fresh and active
+          if (now - cacheTime < cacheDuration && cachedData.contactNumbers && cachedData.isActive) {
+            setContactNumbers(cachedData.contactNumbers);
+            return; // Successfully loaded from cache
+          }
+        }
+        // If we get here, cache doesn't exist or is stale
+        // Don't clear contact numbers - they might have been set by the first useEffect
+        // The first useEffect will handle fetching if needed
+      } catch (error) {
+        // Ignore cache errors - don't clear contact numbers
+      }
+    } else {
+      // No processing files, clear contact numbers
+      setContactNumbers([]);
+    }
+  }, [files]); // Watch files array for status changes
 
   // Using shared utility functions from fileUtils
 
