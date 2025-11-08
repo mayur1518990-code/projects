@@ -69,13 +69,14 @@ export function getFileIconLarge(type: string): ReactNode {
 /**
  * Get status badge styling and text
  */
-export function getStatusBadge(status: "pending_payment" | "paid" | "processing" | "completed" | "pending"): ReactNode {
+export function getStatusBadge(status: "pending_payment" | "paid" | "processing" | "completed" | "pending" | "replacement"): ReactNode {
   const statusConfig = {
     pending_payment: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
     pending: { color: "bg-yellow-100 text-yellow-800", text: "Pending Payment" },
     paid: { color: "bg-green-100 text-green-800", text: "Paid" },
     processing: { color: "bg-blue-100 text-blue-800", text: "Processing" },
-    completed: { color: "bg-gray-100 text-gray-800", text: "Completed" }
+    completed: { color: "bg-gray-100 text-gray-800", text: "Completed" },
+    replacement: { color: "bg-green-100 text-green-800", text: "Paid" }
   };
   
   const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
