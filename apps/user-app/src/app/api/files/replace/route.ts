@@ -115,17 +115,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Don't allow replacing files that are completed
-    // Allow replacing for assigned and processing files so users can update if needed
-    if (existingFileData?.status === 'completed') {
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: `Cannot replace completed files.` 
-        },
-        { status: 400 }
-      );
-    }
+    // If file is completed, change status to replacement
+    // This allows user to request corrections after receiving completed file
+    const shouldChangeToReplacement = existingFileData?.status === 'completed';
 
     const originalName = file.name;
     const size = file.size;
@@ -230,10 +222,20 @@ export async function POST(request: NextRequest) {
       fileUrl: uploadResult.url,
       updatedAt: new Date().toISOString(),
       replacedAt: new Date().toISOString(),
-      // Preserve existing status and metadata
-      status: existingFileData?.status || 'pending_payment',
+      // If file was completed, change status to replacement
+      // If file is already replacement, keep it as replacement (no payment needed)
+      status: shouldChangeToReplacement ? 'replacement' : (existingFileData?.status === 'replacement' ? 'replacement' : (existingFileData?.status || 'pending_payment')),
       metadata: existingFileData?.metadata || {}
     };
+
+    // Preserve payment status - replacement files should not require payment again
+    // Only include payment fields if they exist (Firestore doesn't allow undefined)
+    if (existingFileData?.paymentId) {
+      updateData.paymentId = existingFileData.paymentId;
+    }
+    if (existingFileData?.paidAt) {
+      updateData.paidAt = existingFileData.paidAt;
+    }
 
     // Add comment if provided
     if (comment && comment.trim()) {

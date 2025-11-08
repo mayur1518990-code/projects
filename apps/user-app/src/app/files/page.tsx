@@ -13,7 +13,7 @@ interface FileData {
   name: string;
   size: number;
   type: string;
-  status: "pending_payment" | "paid" | "processing" | "completed";
+  status: "pending_payment" | "paid" | "processing" | "completed" | "replacement";
   uploadDate: Date;
   qrCode?: string;
   paymentAmount: number;
@@ -48,6 +48,8 @@ interface FileData {
     agentName: string;
   };
   completedFileId?: string;
+  editTimerMinutes?: number;
+  editTimerStartedAt?: string;
 }
 
 export default function FilesPage() {
@@ -197,6 +199,10 @@ export default function FilesPage() {
             case 'completed':
               uiStatus = 'completed';
               break;
+            case 'replacement':
+              // Replacement files should show as "paid" - no payment needed
+              uiStatus = 'paid';
+              break;
             default:
               uiStatus = 'pending_payment';
           }
@@ -226,7 +232,10 @@ export default function FilesPage() {
             completedAt: file.completedAt,
             // Completed file data
             completedFile: file.completedFile,
-            completedFileId: file.completedFileId
+            completedFileId: file.completedFileId,
+            // Timer data
+            editTimerMinutes: file.editTimerMinutes,
+            editTimerStartedAt: file.editTimerStartedAt
           };
         });
       
@@ -320,33 +329,103 @@ export default function FilesPage() {
 
   // No auto-refresh - only fetch on page load or manual refresh
 
-  // Fetch contact numbers on mount (only once) - non-blocking
-  const contactFetchedRef = useRef(false);
+  // Fetch contact numbers ONCE on load, then only update when admin makes changes
   useEffect(() => {
-    if (contactFetchedRef.current) return;
-    contactFetchedRef.current = true;
-
-    // Fetch in background - don't block page render
-    const fetchContactNumbers = async () => {
+    let cleanup: (() => void) | undefined;
+    let mounted = true;
+    
+    const init = async () => {
+      // Check localStorage cache first (24 hour cache - data rarely changes)
       try {
-        const response = await fetch('/api/contact-numbers');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.isActive) {
-            setContactNumbers(data.contactNumbers || []);
+        const cached = localStorage.getItem('contact_numbers_cache');
+        if (cached) {
+          const cachedData = JSON.parse(cached);
+          const cacheTime = cachedData.timestamp || 0;
+          const now = Date.now();
+          const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
+          
+          // Use cached data if still fresh
+          if (now - cacheTime < cacheDuration) {
+            if (cachedData.contactNumbers && cachedData.isActive && mounted) {
+              setContactNumbers(cachedData.contactNumbers);
+            }
           }
         }
       } catch (error) {
-        // Silent fail - contact numbers are not critical
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Error fetching contact numbers:', error);
+        // Ignore cache errors
+      }
+
+      const fetchContactNumbers = async () => {
+        try {
+          const response = await fetch('/api/contact-numbers');
+          if (response.ok && mounted) {
+            const data = await response.json();
+            if (data.success && data.isActive) {
+              setContactNumbers(data.contactNumbers || []);
+              
+              // Cache in localStorage for 24 hours (data rarely changes)
+              try {
+                localStorage.setItem('contact_numbers_cache', JSON.stringify({
+                  contactNumbers: data.contactNumbers || [],
+                  isActive: data.isActive,
+                  timestamp: Date.now()
+                }));
+              } catch (cacheError) {
+                // Ignore localStorage errors
+              }
+            } else {
+              setContactNumbers([]);
+            }
+          }
+        } catch (error) {
+          // Silent fail - contact numbers are not critical
+          if (process.env.NODE_ENV === 'development') {
+            console.error('Error fetching contact numbers:', error);
+          }
+        }
+      };
+
+      // Only fetch if cache is empty or expired
+      const cachedData = localStorage.getItem('contact_numbers_cache');
+      let shouldFetch = false;
+      let hasValidCache = false;
+      
+      if (!cachedData) {
+        shouldFetch = true;
+      } else {
+        try {
+          const parsed = JSON.parse(cachedData);
+          const cacheTime = parsed.timestamp || 0;
+          const now = Date.now();
+          const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
+          
+          if (now - cacheTime >= cacheDuration) {
+            shouldFetch = true;
+          } else if (parsed.contactNumbers && parsed.isActive) {
+            hasValidCache = true;
+          }
+        } catch {
+          shouldFetch = true;
         }
       }
+      
+      if (shouldFetch) {
+        // Initial fetch in background (non-blocking) - only if no cache
+        fetchContactNumbers();
+      }
+      
+      // Note: Firestore real-time listeners removed due to permission restrictions
+      // Cache works perfectly - contact numbers will update when cache expires (24 hours)
+      // or when user refreshes after admin makes changes
     };
-
-    // Don't await - fetch in background
-    fetchContactNumbers();
-  }, []);
+    
+    init();
+    
+    return () => {
+      mounted = false;
+      cleanup?.();
+    };
+  }, []); // Only run once on mount
 
   // Using shared utility functions from fileUtils
 
@@ -556,6 +635,28 @@ export default function FilesPage() {
   }, [user, files]);
 
   const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
+  const [timerCountdown, setTimerCountdown] = useState<Map<string, number>>(new Map());
+  
+  // Timer countdown effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newCountdown = new Map<string, number>();
+      files.forEach(file => {
+        if (file.status === "completed" && file.editTimerMinutes && file.editTimerStartedAt) {
+          const startTime = new Date(file.editTimerStartedAt).getTime();
+          const timerDuration = file.editTimerMinutes * 60 * 1000;
+          const elapsed = Date.now() - startTime;
+          const remaining = Math.max(0, timerDuration - elapsed);
+          if (remaining > 0) {
+            newCountdown.set(file.id, remaining);
+          }
+        }
+      });
+      setTimerCountdown(newCountdown);
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [files]);
 
   const downloadCompletedFile = useCallback(async (completedFileId: string, filename: string) => {
     if (!user) return;
@@ -845,6 +946,7 @@ export default function FilesPage() {
                     {/* Action Buttons */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-3 sm:pt-4 border-t border-gray-100">
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* Only show payment button for pending_payment status, not for replacement */}
                         {(file.status === "pending_payment") && (
                           <>
                             <LazyPaymentButton
@@ -874,18 +976,40 @@ export default function FilesPage() {
                           View
                         </Link>
                         
-                        {/* Edit button - for pending_payment, paid, and processing status */}
-                        {(file.status === "pending_payment" || file.status === "paid" || file.status === "processing") && (
-                          <Link
-                            href={`/files/edit/${file.id}`}
-                            className="inline-flex items-center px-3 sm:px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
-                          >
-                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                            Edit
-                          </Link>
-                        )}
+                        {/* Edit button - for pending_payment, paid, processing, replacement status, or if timer is active for completed files */}
+                        {(() => {
+                          const canEdit = file.status === "pending_payment" || 
+                                         file.status === "paid" || 
+                                         file.status === "processing" ||
+                                         file.status === "replacement";
+                          
+                          // Check if timer is active for completed files
+                          const timeRemaining = timerCountdown.get(file.id) || 0;
+                          const timerActive = timeRemaining > 0;
+                          
+                          const showEdit = canEdit || timerActive;
+                          
+                          if (!showEdit) return null;
+                          
+                          return (
+                            <Link
+                              href={`/files/edit/${file.id}`}
+                              className="inline-flex items-center px-3 sm:px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+                            >
+                              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Edit
+                              {timerActive && (
+                                <span className="ml-2 text-xs bg-purple-700 px-2 py-0.5 rounded">
+                                  {Math.floor(timeRemaining / 60000)}:{
+                                    String(Math.floor((timeRemaining % 60000) / 1000)).padStart(2, '0')
+                                  }
+                                </span>
+                              )}
+                            </Link>
+                          );
+                        })()}
                         
                         {file.status === "completed" && file.completedFileId && (
                           <button 

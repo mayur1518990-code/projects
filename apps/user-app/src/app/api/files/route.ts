@@ -123,7 +123,10 @@ export async function GET(request: NextRequest) {
         respondedAt: fileData.respondedAt,
         // Completed file data
         completedFile,
-        completedFileId: fileData.completedFileId
+        completedFileId: fileData.completedFileId,
+        // Timer data
+        editTimerMinutes: fileData.editTimerMinutes,
+        editTimerStartedAt: fileData.editTimerStartedAt
       };
 
       // Smart cache for single file based on status
@@ -165,7 +168,8 @@ export async function GET(request: NextRequest) {
         'uploadedAt', 'processedAt', 'filePath', 'metadata', 'createdAt',
         'userComment', 'userCommentUpdatedAt', 'assignedAgentId', 'agentId',
         'responseFileURL', 'responseMessage', 'assignedAt', 'respondedAt',
-        'processingStartedAt', 'completedAt', 'completedFileId'
+        'processingStartedAt', 'completedAt', 'completedFileId',
+        'editTimerMinutes', 'editTimerStartedAt'
       )
       .get();
 
@@ -231,7 +235,10 @@ export async function GET(request: NextRequest) {
         completedAt: data.completedAt,
         // Completed file data - minimal (no lookup)
         completedFile: null, // Will be loaded on-demand if needed
-        completedFileId: data.completedFileId
+        completedFileId: data.completedFileId,
+        // Timer data
+        editTimerMinutes: data.editTimerMinutes,
+        editTimerStartedAt: data.editTimerStartedAt
       };
     });
 

@@ -36,8 +36,8 @@ export async function GET(request: NextRequest) {
       };
     }
 
-    // Cache for 5 minutes (300000ms) since contact numbers rarely change
-    setCached(cacheKey, result, 300000);
+    // Cache for 24 hours (86400000ms) since contact numbers rarely change (months)
+    setCached(cacheKey, result, 86400000);
 
     return NextResponse.json(result);
   } catch (error) {

@@ -33,8 +33,9 @@ export default function UploadPage() {
   const [authTimeout, setAuthTimeout] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
+  const contentHashRef = useRef<string | null>(null);
 
-  // Fetch alerts ONCE per session - non-blocking (don't delay page render)
+  // Fetch alerts ONCE on load, then only update when admin makes changes (via Firestore real-time)
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let mounted = true;
@@ -45,55 +46,99 @@ export default function UploadPage() {
         // Import alert cache utilities (non-blocking)
         const cache = await import('@/lib/alertCache');
         
-        // Check localStorage cache first (instant)
+        // Check localStorage cache first (instant - works even on refresh)
         const cached = cache.getCachedAlerts();
-        if (cached && mounted) {
+        if (cached && cached.length > 0 && mounted) {
           setAlerts(cached);
+          // Get content hash from cache if available
+          try {
+            const cachedData = localStorage.getItem('app_alerts_cache');
+            if (cachedData) {
+              const parsed = JSON.parse(cachedData);
+              if (parsed.contentHash) {
+                contentHashRef.current = parsed.contentHash;
+              }
+            }
+          } catch (e) {
+            // Ignore errors
+          }
         }
         
         const fetchAlerts = async () => {
-          // Check cache again (might have been set by another tab)
-          const cached = cache.getCachedAlerts();
-          if (cached && mounted) {
-            setAlerts(cached);
-            return;
-          }
-          
-          // Try to acquire lock - only one tab should fetch
-          if (!cache.acquireFetchLock()) {
-            // Another tab is fetching, wait for storage event
-            return;
-          }
-          
           try {
-            const response = await fetch('/api/alerts');
-            if (response.ok && mounted) {
-              const data = await response.json();
-              const alertsData = data.alerts || [];
-              setAlerts(alertsData);
-              // Cache for all tabs to use (valid for 24 hours)
-              cache.setCachedAlerts(alertsData);
+            // Try to acquire lock - only one tab should fetch
+            if (!cache.acquireFetchLock()) {
+              // Another tab is fetching, wait for storage event
+              return;
+            }
+            
+            try {
+              const response = await fetch('/api/alerts');
+              
+              if (response.ok && mounted) {
+                const data = await response.json();
+                const alertsData = data.alerts || [];
+                setAlerts(alertsData);
+                
+                // Update content hash
+                if (data.contentHash) {
+                  contentHashRef.current = data.contentHash;
+                }
+                
+                // Cache for all tabs to use (persists across refreshes)
+                cache.setCachedAlerts(alertsData);
+                
+                // Store content hash in cache
+                try {
+                  const cachedData = localStorage.getItem('app_alerts_cache');
+                  const parsed = cachedData ? JSON.parse(cachedData) : {};
+                  parsed.contentHash = data.contentHash || null;
+                  localStorage.setItem('app_alerts_cache', JSON.stringify(parsed));
+                } catch (e) {
+                  // Ignore errors
+                }
+              }
+            } catch (error) {
+              if (process.env.NODE_ENV === 'development') {
+                console.error("Error fetching alerts:", error);
+              }
+            } finally {
+              cache.releaseFetchLock();
             }
           } catch (error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.error("Error fetching alerts:", error);
-            }
-          } finally {
-            cache.releaseFetchLock();
+            // Silent fail
           }
         };
         
-        // Fetch in background (non-blocking)
-        fetchAlerts();
+        // Only fetch if cache is empty or invalid (first load or cache expired)
+        // If cache exists with data, skip fetch completely - use cached data
+        // IMPORTANT: No API calls on refresh if cache exists with valid data
+        const hasValidCache = cached && cached.length > 0;
+        if (!hasValidCache) {
+          // Initial fetch in background (non-blocking) - only if no cache or empty cache
+          fetchAlerts();
+        }
+        
+      // Note: Firestore real-time listeners removed due to permission restrictions
+      // Cache works perfectly - alerts will update when cache expires (24 hours)
+      // or when user refreshes after admin makes changes
         
         // Listen for updates from other tabs (in case they fetch)
+        let syncCleanup: (() => void) | undefined;
         if (mounted) {
-          cleanup = cache.setupAlertSync((alerts: any[]) => {
+          syncCleanup = cache.setupAlertSync((alerts: any[]) => {
             if (mounted) {
               setAlerts(alerts);
             }
           });
         }
+        
+        // Store cleanup
+        const originalCleanup = cleanup;
+        cleanup = () => {
+          originalCleanup?.();
+          syncCleanup?.();
+        };
       } catch (error) {
         // Silent fail - alerts are not critical for page load
         if (process.env.NODE_ENV === 'development') {

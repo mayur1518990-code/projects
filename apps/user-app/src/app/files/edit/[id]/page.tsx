@@ -14,6 +14,8 @@ interface FileData {
   status: string;
   uploadedAt: string;
   paymentAmount: number;
+  editTimerMinutes?: number;
+  editTimerStartedAt?: string;
 }
 
 export default function EditFilePage() {
@@ -64,10 +66,29 @@ export default function EditFilePage() {
           return;
         }
 
-        // Check if file can be edited (only block completed files)
+        // Check if file can be edited
+        // Allow editing if:
+        // 1. File is not completed, OR
+        // 2. File is completed but timer is still active
+        let canEdit = file.status !== 'completed';
+        
         if (file.status === 'completed') {
-          setError(`Cannot edit completed files.`);
-          return;
+          // Check if timer is active
+          if (file.editTimerMinutes && file.editTimerStartedAt) {
+            const startTime = new Date(file.editTimerStartedAt).getTime();
+            const timerDuration = file.editTimerMinutes * 60 * 1000; // Convert to milliseconds
+            const elapsed = Date.now() - startTime;
+            const timeRemaining = timerDuration - elapsed;
+            canEdit = timeRemaining > 0;
+            
+            if (!canEdit) {
+              setError(`Edit timer has expired. You can no longer edit this completed file.`);
+              return;
+            }
+          } else {
+            setError(`Cannot edit completed files.`);
+            return;
+          }
         }
 
         setFileData({
@@ -79,6 +100,8 @@ export default function EditFilePage() {
           status: file.status,
           uploadedAt: file.uploadedAt,
           paymentAmount: 0, // Files don't have paymentAmount in the API response
+          editTimerMinutes: file.editTimerMinutes,
+          editTimerStartedAt: file.editTimerStartedAt,
         });
       } catch (err: any) {
         if (process.env.NODE_ENV === 'development') {
@@ -425,7 +448,7 @@ export default function EditFilePage() {
                 <li>Your file ID and payment status will be preserved</li>
                 <li>When replacing files, the old file will be permanently deleted from storage</li>
                 <li>Comments are visible to the assigned agent in real-time</li>
-                <li>You can only edit files that haven't been completed yet</li>
+                <li>Completed files can be edited within the timer duration set by admin</li>
                 <li>Supported formats: PDF, Images, Documents (Max 20MB)</li>
               </ul>
             </div>
