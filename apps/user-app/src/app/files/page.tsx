@@ -735,59 +735,23 @@ export default function FilesPage() {
     try {
       setError(''); // Clear any previous errors
       
-      // Always use direct download endpoint to ensure file downloads directly
-      const directDownloadUrl = `/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`;
+      // OPTIMIZED: Get pre-signed URL (instant response <100ms)
+      // Same logic as agent portal - direct download using window.location
+      const response = await fetch(`/api/files/completed/${completedFileId}/download-url?userId=${user.userId}`);
       
-      // Fetch the file as blob and trigger download
-      // This approach works better for mobile apps to download directly to file management
-      const downloadResponse = await fetch(directDownloadUrl);
-      
-      if (!downloadResponse.ok) {
-        let errorMessage = 'Failed to download file';
-        try {
-          const errorData = await downloadResponse.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch {
-          errorMessage = downloadResponse.statusText || errorMessage;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.downloadUrl) {
+          // FIXED: Direct download using window.location
+          // The Content-Disposition: attachment header forces download
+          window.location.href = data.downloadUrl;
+        } else {
+          setError(data.error || 'Failed to download file');
         }
-        throw new Error(errorMessage);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to download file');
       }
-      
-      // Get filename from Content-Disposition header
-      const contentDisposition = downloadResponse.headers.get('Content-Disposition');
-      let downloadFilename = filename;
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          downloadFilename = filenameMatch[1].replace(/['"]/g, '');
-          try {
-            downloadFilename = decodeURIComponent(downloadFilename);
-          } catch {
-            // Keep original if decode fails
-          }
-        }
-      }
-      
-      // Convert to blob and create download link
-      const blob = await downloadResponse.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      
-      // Create and trigger download
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = downloadFilename;
-      link.style.display = 'none';
-      
-      // Append to body and click
-      document.body.appendChild(link);
-      link.click();
-      
-      // Clean up after download starts
-      setTimeout(() => {
-        document.body.removeChild(link);
-        URL.revokeObjectURL(blobUrl);
-      }, 100);
-      
     } catch (error: any) {
       setError(error.message || 'Failed to download completed file. Please try again.');
     } finally {
