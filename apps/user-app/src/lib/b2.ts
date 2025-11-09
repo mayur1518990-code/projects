@@ -350,8 +350,12 @@ export function getSignedDownloadUrl(key: string, expiresIn: number = 300, filen
   };
 
   // Force download with proper filename (instead of opening in browser)
+  // Use RFC 5987 encoding for filename to avoid double-encoding issues
   if (filename) {
-    params.ResponseContentDisposition = `attachment; filename="${encodeURIComponent(filename)}"`;
+    // Escape quotes and backslashes in filename, but don't encode the whole thing
+    // AWS SDK will handle the proper encoding in the query string
+    const safeFilename = filename.replace(/"/g, '\\"').replace(/\\/g, '\\\\');
+    params.ResponseContentDisposition = `attachment; filename="${safeFilename}"`;
   }
 
   try {

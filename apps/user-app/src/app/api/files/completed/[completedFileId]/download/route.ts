@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import { getSignedDownloadUrl, extractKeyFromUrl } from '@/lib/b2';
+import { getSignedDownloadUrl, extractKeyFromUrl, getFileStream } from '@/lib/b2';
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +12,7 @@ export async function GET(
     // Get user ID from query params first for faster validation
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
+    const direct = searchParams.get('direct') === 'true'; // For mobile apps - stream directly
     
     if (!userId) {
       return NextResponse.json({
@@ -81,9 +82,40 @@ export async function GET(
     try {
       // Get filename for proper download
       const filename = completedFileData?.originalName || completedFileData?.filename || 'download';
+      const mimeType = completedFileData?.mimeType || 'application/octet-stream';
       
-      // Generate signed URL for direct B2 download with forced download header
-      // URL expires in 5 minutes (300 seconds)
+      // For mobile apps: stream file directly to avoid signed URL encoding issues
+      if (direct) {
+        try {
+          const fileStream = await getFileStream(b2Key);
+          
+          // Convert stream to buffer for Next.js Response
+          const chunks: Buffer[] = [];
+          for await (const chunk of fileStream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          const buffer = Buffer.concat(chunks);
+          
+          // Return file as stream with proper headers
+          return new NextResponse(buffer, {
+            headers: {
+              'Content-Type': mimeType,
+              'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+              'Content-Length': buffer.length.toString(),
+              'Cache-Control': 'no-store',
+            },
+          });
+        } catch (streamError: any) {
+          // If streaming fails, return JSON error
+          return NextResponse.json({
+            success: false,
+            error: streamError.message || 'Failed to stream file'
+          }, { status: 500 });
+        }
+      }
+      
+      // For browsers: return signed URL (faster, no server load)
+      // Fix: Don't double-encode filename - let AWS SDK handle it
       const signedUrl = getSignedDownloadUrl(b2Key, 300, filename);
       
       // Return signed URL in JSON for client to handle
@@ -91,7 +123,7 @@ export async function GET(
         success: true,
         downloadUrl: signedUrl,
         filename: filename,
-        mimeType: completedFileData?.mimeType || 'application/octet-stream'
+        mimeType: mimeType
       }, {
         headers: {
           'Cache-Control': 'no-store' // Don't cache signed URLs
@@ -100,12 +132,12 @@ export async function GET(
 
     } catch (error: any) {
       if (process.env.NODE_ENV === 'development') {
-        console.error('B2 signed URL error:', error);
+        console.error('B2 download error:', error);
       }
       
       return NextResponse.json({
         success: false,
-        error: 'Failed to generate download URL'
+        error: 'Failed to download file'
       }, { status: 500 });
     }
 

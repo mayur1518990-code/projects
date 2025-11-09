@@ -735,71 +735,64 @@ export default function FilesPage() {
     try {
       setError(''); // Clear any previous errors
       
-      // Get signed download URL from API
-      const response = await fetch(`/api/files/completed/${completedFileId}/download?userId=${user.userId}`);
-      const result = await response.json();
+      // Always use direct download endpoint to ensure file downloads directly
+      // without opening any websites (works for both mobile and desktop)
+      const directDownloadUrl = `/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`;
       
-      if (!result.success || !result.downloadUrl) {
-        throw new Error(result.error || 'Failed to get download URL');
-      }
+      // Fetch the file directly from our API (which streams it from B2)
+      const downloadResponse = await fetch(directDownloadUrl);
       
-      // Detect if running in WebView (mobile app)
-      const isWebView = /(wv|WebView|; wv\))/i.test(navigator.userAgent) || 
-                       (!/Chrome\//i.test(navigator.userAgent) && /Version\//i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent));
-      
-      if (isWebView) {
-        // For mobile apps/WebView: fetch blob and create download link
-        // This prevents white screen issues with target="_blank"
+      if (!downloadResponse.ok) {
+        // Try to get error message from response
+        let errorMessage = 'Failed to download file';
         try {
-          const downloadResponse = await fetch(result.downloadUrl);
-          if (!downloadResponse.ok) {
-            throw new Error('Failed to download file');
-          }
-          
-          const blob = await downloadResponse.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          
-          // Create download link without target="_blank" for mobile compatibility
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = result.filename || filename;
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          
-          // Clean up blob URL and anchor element
-          setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(blobUrl);
-          }, 100);
-        } catch (blobError: any) {
-          // Fallback: try direct link without target="_blank"
-          const a = document.createElement('a');
-          a.href = result.downloadUrl;
-          a.download = result.filename || filename;
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          
-          setTimeout(() => {
-            document.body.removeChild(a);
-          }, 100);
+          const errorData = await downloadResponse.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = downloadResponse.statusText || errorMessage;
         }
-      } else {
-        // For regular browsers: use direct link (no target="_blank" to avoid white screen)
-        const a = document.createElement('a');
-        a.href = result.downloadUrl;
-        a.download = result.filename || filename;
-        a.rel = 'noopener noreferrer';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        
-        // Clean up
-        setTimeout(() => {
-          document.body.removeChild(a);
-        }, 100);
+        throw new Error(errorMessage);
       }
+      
+      // Get the filename from Content-Disposition header or use provided filename
+      const contentDisposition = downloadResponse.headers.get('Content-Disposition');
+      let downloadFilename = filename;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          downloadFilename = filenameMatch[1].replace(/['"]/g, '');
+          // Decode URI if needed
+          try {
+            downloadFilename = decodeURIComponent(downloadFilename);
+          } catch {
+            // If decoding fails, use as is
+          }
+        }
+      }
+      
+      // Convert response to blob
+      const blob = await downloadResponse.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      
+      // Create download link - force download without opening any pages
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = downloadFilename; // Force download with this filename
+      a.style.display = 'none';
+      a.setAttribute('download', downloadFilename); // Ensure download attribute is set
+      document.body.appendChild(a);
+      
+      // Trigger download
+      a.click();
+      
+      // Clean up blob URL and anchor element
+      setTimeout(() => {
+        if (document.body.contains(a)) {
+          document.body.removeChild(a);
+        }
+        URL.revokeObjectURL(blobUrl);
+      }, 100);
       
     } catch (error: any) {
       setError(error.message || 'Failed to download completed file. Please try again.');
