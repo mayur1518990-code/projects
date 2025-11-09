@@ -51,3 +51,21 @@ body {
 .scroll-container:hover .scroll-text {
   animation-play-state: paused;
 }
+
+/* Custom scrollbar for mobile tabs */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 4px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background-color: #cbd5e0;
+  border-radius: 2px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background-color: #a0aec0;
+}
