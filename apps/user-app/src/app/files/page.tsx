@@ -735,35 +735,34 @@ export default function FilesPage() {
     try {
       setError(''); // Clear any previous errors
       
-      // FIXED: Use direct download endpoint (not B2 signed URL) to prevent redirect to B2
-      // The direct=true parameter streams file through our server with Content-Disposition: attachment
-      // This triggers download. Since it's our server (not B2), it won't redirect to B2 website
-      const downloadUrl = `/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`;
+      // OPTIMIZED: Get pre-signed URL (instant response <100ms)
+      // Same logic as agent portal - direct download using window.location
+      const response = await fetch(`/api/files/completed/${completedFileId}/download-url?userId=${user.userId}`);
       
-      // Use window.location.href - this is the most reliable method
-      // The Content-Disposition: attachment header will force download
-      // Even if page briefly navigates, download will start and user can navigate back
-      window.location.href = downloadUrl;
-      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.downloadUrl) {
+          // FIXED: Direct download using window.location
+          // The Content-Disposition: attachment header forces download
+          window.location.href = data.downloadUrl;
+        } else {
+          setError(data.error || 'Failed to download file');
+        }
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to download file');
+      }
     } catch (error: any) {
-      console.error('Download error:', error);
       setError(error.message || 'Failed to download completed file. Please try again.');
-      // Re-enable button on error
-      setDownloadingFiles(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(completedFileId);
-        return newSet;
-      });
     } finally {
-      // Re-enable button after 3 seconds to allow download to start
-      // Note: If download triggers, user may navigate away, so this is just cleanup
+      // Re-enable button after 500ms
       setTimeout(() => {
         setDownloadingFiles(prev => {
           const newSet = new Set(prev);
           newSet.delete(completedFileId);
           return newSet;
         });
-      }, 3000);
+      }, 500);
     }
   }, [user, downloadingFiles]);
 
