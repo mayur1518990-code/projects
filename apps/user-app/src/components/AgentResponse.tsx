@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, memo } from "react";
+import { isWebView, downloadFileWithProgress } from "@/lib/downloadUtils";
 
 interface AgentResponseProps {
   response: {
@@ -50,6 +51,27 @@ export const AgentResponse = memo(function AgentResponse({ response }: AgentResp
     return response.responseFileURL?.split('/').pop() || 'Response File';
   }, [response.responseFileURL]);
 
+  const handleDownload = useCallback(async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (!response.responseFileURL) return;
+
+    try {
+      const inWebView = isWebView();
+      
+      if (inWebView) {
+        // For WebView: Download using blob method
+        await downloadFileWithProgress(response.responseFileURL, fileName);
+      } else {
+        // For regular browsers: Open in new tab
+        window.open(response.responseFileURL, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error: any) {
+      console.error('Download error:', error);
+      // Fallback to opening in new tab
+      window.open(response.responseFileURL, '_blank', 'noopener,noreferrer');
+    }
+  }, [response.responseFileURL, fileName]);
+
   return (
     <div className="bg-green-50 border border-green-200 rounded-lg p-4 mt-4">
       <div className="flex items-center justify-between">
@@ -96,9 +118,8 @@ export const AgentResponse = memo(function AgentResponse({ response }: AgentResp
                 </div>
                 <a
                   href={response.responseFileURL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center px-3 py-1 border border-green-300 text-xs font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 transition-colors"
+                  onClick={handleDownload}
+                  className="inline-flex items-center px-3 py-1 border border-green-300 text-xs font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 transition-colors cursor-pointer"
                 >
                   Download
                 </a>
