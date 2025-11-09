@@ -78,22 +78,42 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
-    const initializeAuth = async () => {
+    let checkStorageInterval: NodeJS.Timeout | undefined;
+    
+    // Listen for storage changes (when login stores user in localStorage)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'user') {
+        const storedUser = getUserFromStorage();
+        if (storedUser) {
+          setUser(storedUser);
+          updateUserCache(storedUser);
+        }
+      }
+    };
+    
+    const initializeAuth = () => {
       try {
+        // First, check localStorage for user (supports name+phone authentication)
+        const storedUser = getUserFromStorage();
+        if (storedUser) {
+          setUser(storedUser);
+          setLoading(false);
+          setInitialized(true);
+        }
+
         // Fast timeout for better UX - only for fallback if Firebase fails
         timeoutRef.current = setTimeout(() => {
           // If we already have user from localStorage, keep them logged in
-          if (user) {
-            setLoading(false);
-            setInitialized(true);
-          } else {
-            // If no user data anywhere, show login
-            setLoading(false);
-            setInitialized(true);
+          const currentStoredUser = getUserFromStorage();
+          if (currentStoredUser) {
+            setUser(currentStoredUser);
           }
+          setLoading(false);
+          setInitialized(true);
         }, 1000); // 1s timeout for faster response
 
-        // Initialize auth listener immediately - don't wait for localStorage
+        // Initialize auth listener for Firebase Auth (for agents/admins)
+        // But don't clear localStorage user if Firebase has no user
         unsubscribeRef.current = onAuthStateChanged(auth, (firebaseUser) => {
           if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
@@ -110,27 +130,34 @@ export function useAuth() {
               localStorage.setItem('user', JSON.stringify(userData));
             } catch {}
           } else {
-            // Only clear user if we're sure they're logged out
-            setUser(null);
-            updateUserCache(null);
-            
-            // Clear localStorage asynchronously to avoid blocking
-            if (typeof requestIdleCallback !== 'undefined') {
-              requestIdleCallback(() => {
-                localStorage.removeItem('user');
-                localStorage.removeItem('token');
-              });
-            } else {
-              setTimeout(() => {
-                localStorage.removeItem('user');
-                localStorage.removeItem('token');
-              }, 0);
+            // Don't clear user if we have one in localStorage (name+phone auth)
+            // Only clear if explicitly signed out
+            const storedUser = getUserFromStorage();
+            if (!storedUser) {
+              setUser(null);
+              updateUserCache(null);
             }
           }
           
           setLoading(false);
           setInitialized(true);
         });
+
+        // Also check localStorage periodically for changes (for same-tab updates)
+        checkStorageInterval = setInterval(() => {
+          const storedUser = getUserFromStorage();
+          if (storedUser) {
+            setUser((currentUser) => {
+              if (!currentUser || storedUser.userId !== currentUser.userId) {
+                return storedUser;
+              }
+              return currentUser;
+            });
+            updateUserCache(storedUser);
+          }
+        }, 500); // Check every 500ms
+
+        window.addEventListener('storage', handleStorageChange);
       } catch (error) {
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
@@ -149,12 +176,23 @@ export function useAuth() {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      if (checkStorageInterval) {
+        clearInterval(checkStorageInterval);
+      }
+      window.removeEventListener('storage', handleStorageChange);
     };
-  }, [createUserFromFirebase, updateUserCache]);
+  }, [createUserFromFirebase, updateUserCache, getUserFromStorage]);
 
   const signOut = useCallback(async () => {
     try {
-      await firebaseSignOut(auth);
+      // Try to sign out from Firebase (for agents/admins)
+      try {
+        await firebaseSignOut(auth);
+      } catch (error) {
+        // Ignore Firebase sign out errors (user might not be using Firebase Auth)
+      }
+      
+      // Always clear user state and localStorage
       setUser(null);
       updateUserCache(null);
       

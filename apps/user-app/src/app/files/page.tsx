@@ -743,20 +743,63 @@ export default function FilesPage() {
         throw new Error(result.error || 'Failed to get download URL');
       }
       
-      // Use only anchor method for reliable, single download
-      const a = document.createElement('a');
-      a.href = result.downloadUrl;
-      a.download = result.filename || filename;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
+      // Detect if running in WebView (mobile app)
+      const isWebView = /(wv|WebView|; wv\))/i.test(navigator.userAgent) || 
+                       (!/Chrome\//i.test(navigator.userAgent) && /Version\//i.test(navigator.userAgent) && /Mobile/i.test(navigator.userAgent));
       
-      // Clean up
-      setTimeout(() => {
-        document.body.removeChild(a);
-      }, 100);
+      if (isWebView) {
+        // For mobile apps/WebView: fetch blob and create download link
+        // This prevents white screen issues with target="_blank"
+        try {
+          const downloadResponse = await fetch(result.downloadUrl);
+          if (!downloadResponse.ok) {
+            throw new Error('Failed to download file');
+          }
+          
+          const blob = await downloadResponse.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          
+          // Create download link without target="_blank" for mobile compatibility
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = result.filename || filename;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          
+          // Clean up blob URL and anchor element
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+          }, 100);
+        } catch (blobError: any) {
+          // Fallback: try direct link without target="_blank"
+          const a = document.createElement('a');
+          a.href = result.downloadUrl;
+          a.download = result.filename || filename;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          
+          setTimeout(() => {
+            document.body.removeChild(a);
+          }, 100);
+        }
+      } else {
+        // For regular browsers: use direct link (no target="_blank" to avoid white screen)
+        const a = document.createElement('a');
+        a.href = result.downloadUrl;
+        a.download = result.filename || filename;
+        a.rel = 'noopener noreferrer';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        
+        // Clean up
+        setTimeout(() => {
+          document.body.removeChild(a);
+        }, 100);
+      }
       
     } catch (error: any) {
       setError(error.message || 'Failed to download completed file. Please try again.');

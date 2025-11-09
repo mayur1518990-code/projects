@@ -3,17 +3,14 @@
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
 import { useAuthContext } from "@/components/AuthProvider";
 
 export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuthContext();
   const [formData, setFormData] = useState({
-    email: "",
-    password: "",
+    name: "",
+    phone: "",
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -25,9 +22,9 @@ export default function LoginPage() {
     }
   }, [user, loading, router]);
 
-  const validateEmail = useCallback((email: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+  const validatePhone = useCallback((phone: string) => {
+    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+    return phoneRegex.test(phone.replace(/\s/g, ""));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,58 +34,47 @@ export default function LoginPage() {
 
     try {
       // Validate input
-      if (!formData.email || !validateEmail(formData.email)) {
-        setError("Please enter a valid email address");
+      if (!formData.name || !formData.name.trim()) {
+        setError("Name is required");
+        setIsLoading(false);
         return;
       }
 
-      if (!formData.password) {
-        setError("Password is required");
+      if (!formData.phone || !validatePhone(formData.phone)) {
+        setError("Please enter a valid phone number");
+        setIsLoading(false);
         return;
       }
 
-      // Sign in with Firebase Auth directly
-      const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
-      const user = userCredential.user;
+      // Call login API
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.name.trim(),
+          phone: formData.phone.replace(/\s/g, ""),
+        }),
+      });
 
-      // Try to get user data from Firestore, but don't fail if it doesn't work
-      let userData = null;
-      try {
-        const userDoc = await getDoc(doc(db, 'user', user.uid));
-        if (userDoc.exists()) {
-          userData = userDoc.data();
-        }
-      } catch (error) {
-        // Could not fetch user data from Firestore, using basic info
+      const data = await response.json();
+
+      if (!data.success) {
+        setError(data.message || 'Login failed. Please try again.');
+        setIsLoading(false);
+        return;
       }
 
-      // Store user data with name from Firestore if available, otherwise use email
-      localStorage.setItem('user', JSON.stringify({
-        userId: user.uid,
-        name: userData?.name || user.displayName || user.email?.split('@')[0] || 'User',
-        email: userData?.email || user.email,
-        phone: userData?.phone || user.phoneNumber || '',
-      }));
-      localStorage.setItem('token', await user.getIdToken());
+      // Store user data in localStorage
+      localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem('token', data.token || 'temp-token');
 
-      // Redirect to home page after successful login
-      router.push("/");
+      // Force a full page reload to ensure auth state is updated
+      // This ensures the useAuth hook picks up the new user from localStorage
+      window.location.href = "/";
     } catch (error: any) {
-      
-      // Handle Firebase Auth errors
-      if (error.code === 'auth/user-not-found') {
-        setError('No account found with this email');
-      } else if (error.code === 'auth/wrong-password') {
-        setError('Incorrect password');
-      } else if (error.code === 'auth/invalid-email') {
-        setError('Invalid email address');
-      } else if (error.code === 'auth/too-many-requests') {
-        setError('Too many failed attempts. Please try again later');
-      } else if (error.code === 'auth/user-disabled') {
-        setError('This account has been disabled');
-      } else {
-        setError('Login failed. Please try again.');
-      }
+      setError('Login failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -132,33 +118,33 @@ export default function LoginPage() {
 
             <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
               <div>
-                <label htmlFor="email" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                  Email Address
+                <label htmlFor="name" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                  Name
                 </label>
                 <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.email}
+                  type="text"
+                  id="name"
+                  name="name"
+                  value={formData.name}
                   onChange={handleInputChange}
                   className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base text-gray-900 placeholder-gray-500"
-                  placeholder="Enter your email"
+                  placeholder="Enter your name"
                   required
                 />
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                  Password
+                <label htmlFor="phone" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                  Phone Number
                 </label>
                 <input
-                  type="password"
-                  id="password"
-                  name="password"
-                  value={formData.password}
+                  type="tel"
+                  id="phone"
+                  name="phone"
+                  value={formData.phone}
                   onChange={handleInputChange}
                   className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base text-gray-900 placeholder-gray-500"
-                  placeholder="Enter your password"
+                  placeholder="Enter your phone number"
                   required
                 />
               </div>

@@ -10,14 +10,10 @@ export default function SignupPage() {
   const { user, loading } = useAuthContext();
   const [formData, setFormData] = useState({
     name: "",
-    email: "",
     phone: "",
-    password: "",
-    confirmPassword: "",
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
 
   // Redirect if user is already logged in
   useEffect(() => {
@@ -25,11 +21,6 @@ export default function SignupPage() {
       router.push("/");
     }
   }, [user, loading, router]);
-
-  const validateEmail = useCallback((email: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  }, []);
 
   const validatePhone = useCallback((phone: string) => {
     const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
@@ -45,42 +36,25 @@ export default function SignupPage() {
       // Validate input
       if (!formData.name.trim()) {
         setError("Name is required");
-        return;
-      }
-
-      if (!formData.email || !validateEmail(formData.email)) {
-        setError("Please enter a valid email address");
+        setIsLoading(false);
         return;
       }
 
       if (!formData.phone || !validatePhone(formData.phone)) {
         setError("Please enter a valid phone number");
+        setIsLoading(false);
         return;
       }
 
-      if (!formData.password || formData.password.length < 6) {
-        setError("Password must be at least 6 characters long");
-        return;
-      }
-
-      if (formData.password !== formData.confirmPassword) {
-        setError("Passwords do not match");
-        return;
-      }
-
-
-      // Call our Firebase signup API
+      // Call our signup API
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: formData.name,
-          email: formData.email,
-          phone: formData.phone,
-          password: formData.password,
-          confirmPassword: formData.confirmPassword,
+          name: formData.name.trim(),
+          phone: formData.phone.replace(/\s/g, ""),
         }),
       });
 
@@ -88,18 +62,18 @@ export default function SignupPage() {
 
       if (!data.success) {
         setError(data.message || 'Signup failed. Please try again.');
+        setIsLoading(false);
         return;
       }
 
       // Store user data in localStorage for immediate session management
       localStorage.setItem('user', JSON.stringify(data.user));
-      localStorage.setItem('token', 'temp-token'); // Will be replaced with real token on login
+      localStorage.setItem('token', data.token || 'temp-token');
 
       // Redirect to home page after successful signup
       window.location.href = "/";
     } catch (error) {
       setError("Signup failed. Please try again.");
-    } finally {
       setIsLoading(false);
     }
   };
@@ -158,22 +132,6 @@ export default function SignupPage() {
               </div>
 
               <div>
-                <label htmlFor="email" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base text-gray-900 placeholder-gray-500"
-                  placeholder="Enter your email"
-                  required
-                />
-              </div>
-
-              <div>
                 <label htmlFor="phone" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                   Phone Number
                 </label>
@@ -185,38 +143,6 @@ export default function SignupPage() {
                   onChange={handleInputChange}
                   className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base text-gray-900 placeholder-gray-500"
                   placeholder="Enter your phone number"
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  id="password"
-                  name="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base text-gray-900 placeholder-gray-500"
-                  placeholder="Create a password (min 6 characters)"
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="confirmPassword" className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
-                  Confirm Password
-                </label>
-                <input
-                  type="password"
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base text-gray-900 placeholder-gray-500"
-                  placeholder="Confirm your password"
                   required
                 />
               </div>
