@@ -7,7 +7,6 @@ import { useAuthContext } from "@/components/AuthProvider";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { formatFileSize, getFileIcon, getStatusBadge } from "@/lib/fileUtils";
-import { isWebView, downloadFileWithProgress } from "@/lib/downloadUtils";
 
 interface FileData {
   id: string;
@@ -736,37 +735,22 @@ export default function FilesPage() {
     try {
       setError(''); // Clear any previous errors
       
-      // Check if running in WebView (Android/iOS app)
-      const inWebView = isWebView();
+      // OPTIMIZED: Get pre-signed URL (instant response <100ms)
+      // Same logic as agent portal - direct download using window.location
+      const response = await fetch(`/api/files/completed/${completedFileId}/download-url?userId=${user.userId}`);
       
-      if (inWebView) {
-        // For WebView: Use direct download endpoint with blob handling
-        // This avoids opening external browser and handles downloads properly
-        const downloadUrl = `/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`;
-        
-        try {
-          await downloadFileWithProgress(downloadUrl, filename);
-          // Download successful - no error message needed
-        } catch (downloadError: any) {
-          setError(downloadError.message || 'Failed to download file. Please try again.');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.downloadUrl) {
+          // FIXED: Direct download using window.location
+          // The Content-Disposition: attachment header forces download
+          window.location.href = data.downloadUrl;
+        } else {
+          setError(data.error || 'Failed to download file');
         }
       } else {
-        // For regular browsers: Use pre-signed URL (faster, no server load)
-        const response = await fetch(`/api/files/completed/${completedFileId}/download-url?userId=${user.userId}`);
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.downloadUrl) {
-            // Direct download using window.location
-            // The Content-Disposition: attachment header forces download
-            window.location.href = data.downloadUrl;
-          } else {
-            setError(data.error || 'Failed to download file');
-          }
-        } else {
-          const errorData = await response.json();
-          setError(errorData.error || 'Failed to download file');
-        }
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to download file');
       }
     } catch (error: any) {
       setError(error.message || 'Failed to download completed file. Please try again.');

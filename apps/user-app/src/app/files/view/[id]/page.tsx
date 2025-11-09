@@ -5,7 +5,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatFileSize, getFileIconLarge } from "@/lib/fileUtils";
-import { isWebView, downloadFileWithProgress } from "@/lib/downloadUtils";
 
 interface FileData {
   id: string;
@@ -161,39 +160,6 @@ export default function ViewDocumentPage() {
     }
   }, [user, fileId]);
 
-  // Download handler for WebView compatibility
-  const handleDownload = useCallback(async (e: React.MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => {
-    e.preventDefault();
-    if (!file || !user) return;
-
-    try {
-      const inWebView = isWebView();
-      const filename = file.originalName || file.filename;
-
-      if (inWebView) {
-        // For WebView: Use direct download endpoint with blob handling
-        let downloadUrl: string;
-        if (file.status === 'completed' && file.completedFileId) {
-          downloadUrl = `/api/files/completed/${file.completedFileId}/download?userId=${user.userId}&direct=true`;
-        } else {
-          downloadUrl = `/api/files/content?fileId=${fileId}&userId=${user.userId}`;
-        }
-        
-        await downloadFileWithProgress(downloadUrl, filename);
-      } else {
-        // For regular browsers: Use existing fileContent URL
-        if (fileContent) {
-          const link = document.createElement('a');
-          link.href = fileContent;
-          link.download = filename;
-          link.click();
-        }
-      }
-    } catch (error: any) {
-      setError(error.message || 'Failed to download file. Please try again.');
-    }
-  }, [file, fileContent, user, fileId]);
-
   useEffect(() => {
     if (user && !authLoading && fileId) {
       loadFile();
@@ -234,12 +200,13 @@ export default function ViewDocumentPage() {
             <span className="text-sm text-gray-600">PDF Document</span>
             <div className="flex items-center space-x-2">
               <span className="text-xs text-gray-500">{Math.round(file.size / 1024)} KB</span>
-              <button
-                onClick={handleDownload}
-                className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer"
+              <a 
+                href={fileContent} 
+                download={file.originalName}
+                className="text-xs text-blue-600 hover:text-blue-800"
               >
                 Download
-              </button>
+              </a>
             </div>
           </div>
           <div className={`w-full ${
@@ -255,12 +222,13 @@ export default function ViewDocumentPage() {
                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
                   </svg>
                   <p className="text-sm text-gray-600 mb-3">PDF Preview not available in mobile app</p>
-                  <button
-                    onClick={handleDownload}
+                  <a 
+                    href={fileContent} 
+                    download={file.originalName}
                     className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
                   >
                     Download PDF
-                  </button>
+                  </a>
                 </div>
               </div>
             ) : (
@@ -294,15 +262,16 @@ export default function ViewDocumentPage() {
         <p className="text-sm sm:text-base text-gray-500 mb-3 sm:mb-4">
           Preview not available for this file type
         </p>
-        <button
-          onClick={handleDownload}
+        <a 
+          href={fileContent} 
+          download={file.originalName}
           className="bg-blue-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
         >
           Download File
-        </button>
+        </a>
       </div>
     );
-  }, [file, fileContent, getFileIconLarge, handleDownload]);
+  }, [file, fileContent, getFileIconLarge]);
 
   // Show loading if checking authentication
   if (authLoading) {
@@ -418,12 +387,13 @@ export default function ViewDocumentPage() {
               >
                 My Files
               </Link>
-              <button
-                onClick={handleDownload}
+              <a 
+                href={fileContent || '#'} 
+                download={file.originalName}
                 className="bg-blue-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 Download
-              </button>
+              </a>
             </div>
           </div>
         </div>
@@ -456,12 +426,13 @@ export default function ViewDocumentPage() {
                 </div>
               </div>
               <div className="mt-3 flex flex-col sm:flex-row gap-2">
-                <button
-                  onClick={handleDownload}
+                <a 
+                  href={fileContent || '#'} 
+                  download={file?.originalName}
                   className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors text-center"
                 >
                   Download File
-                </button>
+                </a>
                 {/(wv|WebView|; wv\))/i.test(navigator.userAgent) && (
                   <a 
                     href={window.location.href.replace(/^https?:\/\/[^\/]+/, 'https://your-website-domain.com')}
