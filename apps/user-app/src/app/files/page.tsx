@@ -735,78 +735,35 @@ export default function FilesPage() {
     try {
       setError(''); // Clear any previous errors
       
-      // FIXED: Use direct download endpoint to stream file through server
-      // This prevents redirecting to B2 website in mobile apps (median.co)
-      // The direct=true parameter streams the file directly without redirecting
-      const response = await fetch(`/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`);
+      // FIXED: Use direct download endpoint (not B2 signed URL) to prevent redirect to B2
+      // The direct=true parameter streams file through our server with Content-Disposition: attachment
+      // This triggers download. Since it's our server (not B2), it won't redirect to B2 website
+      const downloadUrl = `/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`;
       
-      if (response.ok) {
-        // Check if response is JSON (error) or binary (file)
-        const contentType = response.headers.get('content-type');
-        
-        if (contentType?.includes('application/json')) {
-          // Handle JSON error response
-          const data = await response.json();
-          setError(data.error || 'Failed to download file');
-        } else {
-          // File is being streamed - convert to blob and download
-          const blob = await response.blob();
-          
-          // Get filename from Content-Disposition header or use provided filename
-          let downloadFilename = filename;
-          const contentDisposition = response.headers.get('content-disposition');
-          if (contentDisposition) {
-            // Try RFC 5987 format first (filename*=UTF-8''encoded)
-            const rfc5987Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/);
-            if (rfc5987Match && rfc5987Match[1]) {
-              try {
-                downloadFilename = decodeURIComponent(rfc5987Match[1]);
-              } catch {
-                // If decoding fails, try standard format
-              }
-            } else {
-              // Try standard format (filename="value")
-              const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-              if (filenameMatch && filenameMatch[1]) {
-                downloadFilename = filenameMatch[1].replace(/['"]/g, '');
-                // Decode URI-encoded filename if needed
-                try {
-                  downloadFilename = decodeURIComponent(downloadFilename);
-                } catch {
-                  // If decoding fails, use as-is
-                }
-              }
-            }
-          }
-          
-          // Create blob URL and trigger download
-          const blobUrl = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = downloadFilename;
-          link.style.display = 'none';
-          document.body.appendChild(link);
-          link.click();
-          
-          // Cleanup
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(blobUrl);
-        }
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to download file' }));
-        setError(errorData.error || 'Failed to download file');
-      }
+      // Use window.location.href - this is the most reliable method
+      // The Content-Disposition: attachment header will force download
+      // Even if page briefly navigates, download will start and user can navigate back
+      window.location.href = downloadUrl;
+      
     } catch (error: any) {
+      console.error('Download error:', error);
       setError(error.message || 'Failed to download completed file. Please try again.');
+      // Re-enable button on error
+      setDownloadingFiles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(completedFileId);
+        return newSet;
+      });
     } finally {
-      // Re-enable button after 500ms
+      // Re-enable button after 3 seconds to allow download to start
+      // Note: If download triggers, user may navigate away, so this is just cleanup
       setTimeout(() => {
         setDownloadingFiles(prev => {
           const newSet = new Set(prev);
           newSet.delete(completedFileId);
           return newSet;
         });
-      }, 500);
+      }, 3000);
     }
   }, [user, downloadingFiles]);
 
