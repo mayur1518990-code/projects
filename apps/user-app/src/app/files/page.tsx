@@ -736,61 +736,55 @@ export default function FilesPage() {
       setError(''); // Clear any previous errors
       
       // Always use direct download endpoint to ensure file downloads directly
-      // without opening any websites (works for both mobile and desktop)
       const directDownloadUrl = `/api/files/completed/${completedFileId}/download?userId=${user.userId}&direct=true`;
       
-      // Fetch the file directly from our API (which streams it from B2)
+      // Fetch the file as blob and trigger download
+      // This approach works better for mobile apps to download directly to file management
       const downloadResponse = await fetch(directDownloadUrl);
       
       if (!downloadResponse.ok) {
-        // Try to get error message from response
         let errorMessage = 'Failed to download file';
         try {
           const errorData = await downloadResponse.json();
           errorMessage = errorData.error || errorMessage;
         } catch {
-          // If response is not JSON, use status text
           errorMessage = downloadResponse.statusText || errorMessage;
         }
         throw new Error(errorMessage);
       }
       
-      // Get the filename from Content-Disposition header or use provided filename
+      // Get filename from Content-Disposition header
       const contentDisposition = downloadResponse.headers.get('Content-Disposition');
       let downloadFilename = filename;
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
         if (filenameMatch && filenameMatch[1]) {
           downloadFilename = filenameMatch[1].replace(/['"]/g, '');
-          // Decode URI if needed
           try {
             downloadFilename = decodeURIComponent(downloadFilename);
           } catch {
-            // If decoding fails, use as is
+            // Keep original if decode fails
           }
         }
       }
       
-      // Convert response to blob
+      // Convert to blob and create download link
       const blob = await downloadResponse.blob();
       const blobUrl = URL.createObjectURL(blob);
       
-      // Create download link - force download without opening any pages
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = downloadFilename; // Force download with this filename
-      a.style.display = 'none';
-      a.setAttribute('download', downloadFilename); // Ensure download attribute is set
-      document.body.appendChild(a);
+      // Create and trigger download
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = downloadFilename;
+      link.style.display = 'none';
       
-      // Trigger download
-      a.click();
+      // Append to body and click
+      document.body.appendChild(link);
+      link.click();
       
-      // Clean up blob URL and anchor element
+      // Clean up after download starts
       setTimeout(() => {
-        if (document.body.contains(a)) {
-          document.body.removeChild(a);
-        }
+        document.body.removeChild(link);
         URL.revokeObjectURL(blobUrl);
       }, 100);
       

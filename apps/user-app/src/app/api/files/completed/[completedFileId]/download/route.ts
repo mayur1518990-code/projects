@@ -97,12 +97,18 @@ export async function GET(
           const buffer = Buffer.concat(chunks);
           
           // Return file as stream with proper headers
+          // Use proper RFC 5987 encoding for filename to ensure download
+          const encodedFilename = encodeURIComponent(filename);
+          const contentDisposition = `attachment; filename="${filename.replace(/"/g, '\\"')}"; filename*=UTF-8''${encodedFilename}`;
+          
           return new NextResponse(buffer, {
             headers: {
-              'Content-Type': mimeType,
-              'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+              'Content-Type': 'application/octet-stream', // Force download by using octet-stream
+              'Content-Disposition': contentDisposition,
               'Content-Length': buffer.length.toString(),
-              'Cache-Control': 'no-store',
+              'Cache-Control': 'no-store, no-cache, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0',
             },
           });
         } catch (streamError: any) {
