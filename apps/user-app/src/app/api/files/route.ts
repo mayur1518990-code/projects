@@ -156,11 +156,21 @@ export async function GET(request: NextRequest) {
 
     // Get user's files from Firestore with optimized query
     // Using composite index (userId + uploadedAt) for fast query
-    // Removed limit to load all files - user expects to see all their files
+    // Limit to 10 for fastest initial load (<500ms) - aggressive optimization
+    // CRITICAL: Only select needed fields to reduce bandwidth and processing time
     const filesSnapshot = await adminDb
       .collection('files')
       .where('userId', '==', userId)
       .orderBy('uploadedAt', 'desc')
+      .limit(10) // Reduced to 10 for maximum speed
+      .select(
+        'userId', 'filename', 'originalName', 'size', 'mimeType', 'status',
+        'uploadedAt', 'processedAt', 'filePath', 'metadata', 'createdAt',
+        'userComment', 'userCommentUpdatedAt', 'assignedAgentId', 'agentId',
+        'responseFileURL', 'responseMessage', 'assignedAt', 'respondedAt',
+        'processingStartedAt', 'completedAt', 'completedFileId',
+        'editTimerMinutes', 'editTimerStartedAt'
+      )
       .get();
 
     // Early return if no files found
@@ -248,12 +258,12 @@ export async function GET(request: NextRequest) {
       f.status === 'assigned'
     );
 
-    // Optimized cache strategy for fast loading:
-    // - Active files: 10 seconds (faster updates for active files)
-    // - Other files: 30 seconds (good balance for performance)
-    const cacheTTL = hasActiveFiles ? 10000 : 30000;
-    const maxAge = hasActiveFiles ? 10 : 30;
-    const staleTime = hasActiveFiles ? 20 : 60;
+    // AGGRESSIVE CACHE STRATEGY for sub-500ms performance:
+    // - Active files: 15 seconds (balance between real-time and performance)
+    // - Other files: 60 seconds (1 minute for better performance)
+    const cacheTTL = hasActiveFiles ? 15000 : 60000;
+    const maxAge = hasActiveFiles ? 15 : 60;
+    const staleTime = hasActiveFiles ? 30 : 120;
 
     setCached(cacheKey, result, cacheTTL);
 
@@ -262,6 +272,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'Cache-Control': `public, s-maxage=${maxAge}, stale-while-revalidate=${staleTime}`,
         'Content-Type': 'application/json; charset=utf-8',
+        'X-Cache-Strategy': hasActiveFiles ? 'realtime' : 'cached', // Debug header
       }
     });
 
