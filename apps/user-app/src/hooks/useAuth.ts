@@ -114,7 +114,9 @@ export function useAuth() {
 
         // Initialize auth listener for Firebase Auth (for agents/admins)
         // But don't clear localStorage user if Firebase has no user
-        unsubscribeRef.current = onAuthStateChanged(auth, (firebaseUser) => {
+        // Only set up listener if auth is available
+        if (auth) {
+          unsubscribeRef.current = onAuthStateChanged(auth, (firebaseUser) => {
           if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
           }
@@ -141,7 +143,15 @@ export function useAuth() {
           
           setLoading(false);
           setInitialized(true);
-        });
+          });
+        } else {
+          // Firebase not configured - just use localStorage
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+          }
+          setLoading(false);
+          setInitialized(true);
+        }
 
         // Also check localStorage periodically for changes (for same-tab updates)
         checkStorageInterval = setInterval(() => {
@@ -186,10 +196,12 @@ export function useAuth() {
   const signOut = useCallback(async () => {
     try {
       // Try to sign out from Firebase (for agents/admins)
-      try {
-        await firebaseSignOut(auth);
-      } catch (error) {
-        // Ignore Firebase sign out errors (user might not be using Firebase Auth)
+      if (auth) {
+        try {
+          await firebaseSignOut(auth);
+        } catch (error) {
+          // Ignore Firebase sign out errors (user might not be using Firebase Auth)
+        }
       }
       
       // Always clear user state and localStorage
