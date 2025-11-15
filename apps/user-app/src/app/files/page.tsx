@@ -74,6 +74,7 @@ export default function FilesPage() {
   const lastUserIdRef = useRef<string | null>(null); // Track last user ID
   const [contactNumbers, setContactNumbers] = useState<string[]>([]); // Contact numbers for processing files
   const abortControllerRef = useRef<AbortController | null>(null); // For request cancellation
+  const fetchedDownloadUrlsRef = useRef<Set<string>>(new Set()); // Track which download URLs we've fetched
 
   // Memoize localStorage reads to prevent blocking on every render
   const localStorageCache = useMemo(() => {
@@ -699,8 +700,8 @@ export default function FilesPage() {
     }
   }, [user, files]);
 
-  const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
   const [timerCountdown, setTimerCountdown] = useState<Map<string, number>>(new Map());
+  const [downloadUrls, setDownloadUrls] = useState<Map<string, string>>(new Map()); // Pre-fetched download URLs
   
   // Timer countdown effect
   useEffect(() => {
@@ -723,48 +724,82 @@ export default function FilesPage() {
     return () => clearInterval(interval);
   }, [files]);
 
-  const downloadCompletedFile = useCallback(async (completedFileId: string, filename: string) => {
+  // Pre-fetch download URLs for all completed files in the background
+  useEffect(() => {
     if (!user) return;
     
-    // Prevent multiple clicks for the same file
-    if (downloadingFiles.has(completedFileId)) return;
+    const completedFiles = files.filter(f => f.status === "completed" && f.completedFileId);
+    if (completedFiles.length === 0) return;
     
-    // Mark as downloading
-    setDownloadingFiles(prev => new Set(prev).add(completedFileId));
+    // Pre-fetch URLs for completed files that don't have URLs yet
+    const fetchUrls = async () => {
+      const promises = completedFiles
+        .filter(file => {
+          const fileId = file.completedFileId || file.id;
+          // Check ref to avoid duplicate fetches
+          if (fetchedDownloadUrlsRef.current.has(fileId)) {
+            return false;
+          }
+          fetchedDownloadUrlsRef.current.add(fileId);
+          return true;
+        })
+        .map(async (file) => {
+          const fileId = file.completedFileId || file.id;
+          try {
+            const response = await fetch(`/api/files/completed/${fileId}/download-url?userId=${user.userId}`);
+            if (response.ok) {
+              const data = await response.json();
+              if (data.success && data.downloadUrl) {
+                // Use functional update to avoid dependency issues
+                setDownloadUrls(prev => {
+                  const newMap = new Map(prev);
+                  newMap.set(fileId, data.downloadUrl);
+                  return newMap;
+                });
+              }
+            }
+          } catch (error) {
+            // Remove from ref so we can retry later if needed
+            fetchedDownloadUrlsRef.current.delete(fileId);
+            // Silently fail - will fetch on click if needed
+            console.error(`Failed to pre-fetch download URL for ${fileId}:`, error);
+          }
+        });
+      
+      await Promise.all(promises);
+    };
     
-    try {
-      setError(''); // Clear any previous errors
-      
-      // OPTIMIZED: Get pre-signed URL (instant response <100ms)
-      // Same logic as agent portal - direct download using window.location
-      const response = await fetch(`/api/files/completed/${completedFileId}/download-url?userId=${user.userId}`);
-      
-      if (response.ok) {
-        const data = await response.json();
+    fetchUrls();
+  }, [files, user]);
+
+  const downloadCompletedFile = useCallback((completedFileId: string, filename: string) => {
+    if (!user) return;
+    
+    // Check if we have a pre-fetched URL - use it immediately
+    const downloadUrl = downloadUrls.get(completedFileId);
+    
+    if (downloadUrl) {
+      // Instant download - no delay!
+      window.location.href = downloadUrl;
+      return;
+    }
+    
+    // Fallback: fetch URL if not pre-fetched (shouldn't happen normally)
+    fetch(`/api/files/completed/${completedFileId}/download-url?userId=${user.userId}`)
+      .then(response => response.json())
+      .then(data => {
         if (data.success && data.downloadUrl) {
-          // FIXED: Direct download using window.location
-          // The Content-Disposition: attachment header forces download
           window.location.href = data.downloadUrl;
+          // Cache it for next time
+          setDownloadUrls(prev => new Map(prev).set(completedFileId, data.downloadUrl));
         } else {
           setError(data.error || 'Failed to download file');
         }
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to download file');
-      }
-    } catch (error: any) {
-      setError(error.message || 'Failed to download completed file. Please try again.');
-    } finally {
-      // Re-enable button after 500ms
-      setTimeout(() => {
-        setDownloadingFiles(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(completedFileId);
-          return newSet;
-        });
-      }, 500);
-    }
-  }, [user, downloadingFiles]);
+      })
+      .catch(error => {
+        setError(error.message || 'Failed to download completed file. Please try again.');
+      });
+  }, [user, downloadUrls]);
 
   useEffect(() => {
     if (!user) return;
@@ -1076,26 +1111,13 @@ export default function FilesPage() {
                               file.completedFileId || file.id, 
                               file.name
                             )}
-                            disabled={downloadingFiles.has(file.completedFileId || file.id)}
-                            className="inline-flex items-center px-2.5 sm:px-4 py-1.5 sm:py-2 bg-green-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
+                            className="inline-flex items-center px-2.5 sm:px-4 py-1.5 sm:py-2 bg-green-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap flex-shrink-0"
                           >
-                            {downloadingFiles.has(file.completedFileId || file.id) ? (
-                              <>
-                                <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                <span className="hidden sm:inline">Downloading...</span>
-                                <span className="sm:hidden">Loading...</span>
-                              </>
-                            ) : (
-                              <>
-                                <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <span className="hidden sm:inline">Download Completed</span>
-                                <span className="sm:hidden">Download</span>
-                              </>
-                            )}
+                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <span className="hidden sm:inline">Download Completed</span>
+                            <span className="sm:hidden">Download</span>
                           </button>
                         )}
                         
