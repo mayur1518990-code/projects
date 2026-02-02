@@ -2,6 +2,9 @@
   "name": "doc-monorepo",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "^18.18.0 || ^19.8.0 || >= 20.0.0"
+  },
   "workspaces": [
     "apps/*"
   ],
@@ -26,7 +29,7 @@
     "@types/react-dom": "^19",
     "concurrently": "^8.2.2",
     "eslint": "^9",
-    "eslint-config-next": "15.5.3",
+    "eslint-config-next": "15.5.7",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

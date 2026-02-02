@@ -2,6 +2,9 @@
   "name": "user-app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "^18.18.0 || ^19.8.0 || >= 20.0.0"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
@@ -12,6 +15,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "cleanup-b2": "tsx scripts/cleanup-b2-hidden-files.ts",
+    "set-b2-cors": "tsx scripts/set-b2-cors.ts",
     "sync-firestore": "tsx scripts/sync-firestore-with-b2.ts",
     "sync-firestore:dry-run": "tsx scripts/sync-firestore-with-b2.ts --dry-run",
     "sync-firestore:delete": "tsx scripts/sync-firestore-with-b2.ts --delete-orphans",
@@ -21,7 +25,7 @@
     "aws-sdk": "^2.1692.0",
     "firebase": "^12.3.0",
     "firebase-admin": "^13.5.0",
-    "next": "15.5.3",
+    "next": "15.5.7",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.2",
     "react": "19.1.0",
@@ -39,7 +43,7 @@
     "@types/react-dom": "^19",
     "dotenv": "^17.2.3",
     "eslint": "^9",
-    "eslint-config-next": "15.5.3",
+    "eslint-config-next": "15.5.7",
     "jest": "^29.7.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.4",
