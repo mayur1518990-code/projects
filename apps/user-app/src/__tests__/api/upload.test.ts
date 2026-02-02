@@ -62,8 +62,8 @@ describe('Upload API', () => {
 
     it('should return 400 when file size exceeds limit', async () => {
       const formData = new FormData();
-      // Create a large file (25MB)
-      const largeContent = 'x'.repeat(25 * 1024 * 1024);
+      // Create a file > 4MB (Vercel body limit is 4.5MB; we cap at 4MB)
+      const largeContent = 'x'.repeat(5 * 1024 * 1024);
       const file = new File([largeContent], 'large.pdf', { type: 'application/pdf' });
       formData.append('file', file);
       formData.append('userId', 'test-user-id');
@@ -78,7 +78,7 @@ describe('Upload API', () => {
 
       expect(response.status).toBe(400);
       expect(data.success).toBe(false);
-      expect(data.message).toBe('File size exceeds 20MB limit');
+      expect(data.message).toBe('File size exceeds 4MB limit. Maximum upload size is 4MB per file.');
     });
 
     it('should upload file successfully when valid data is provided', async () => {

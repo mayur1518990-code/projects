@@ -1,5 +1,4 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -20,7 +19,6 @@ if (!isConfigValid) {
 
 // Initialize Firebase with error handling and performance optimizations
 let app: FirebaseApp;
-let auth: Auth;
 let db: Firestore;
 
 try {
@@ -31,32 +29,16 @@ try {
   } else {
     app = initializeApp(firebaseConfig);
   }
-  
-  // Initialize services with performance optimizations
-  auth = getAuth(app);
+
   db = getFirestore(app);
-  
-  // Configure Firebase for better performance
-  if (typeof window !== 'undefined') {
-    // Enable persistence for better offline experience
-    import('firebase/auth').then(({ setPersistence, browserLocalPersistence }) => {
-      setPersistence(auth, browserLocalPersistence).catch(error => {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Failed to set auth persistence:', error);
-        }
-      });
-    });
-    
-    // Connect to emulators in development (simplified)
-    if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
-      try {
-        connectAuthEmulator(auth, 'http://localhost:9099');
-        connectFirestoreEmulator(db, 'localhost', 8080);
-      } catch (error) {
-        // Emulators already connected or not available
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('Firebase emulators not available or already connected');
-        }
+
+  // Connect to Firestore emulator in development
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
+    try {
+      connectFirestoreEmulator(db, 'localhost', 8080);
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Firestore emulator not available or already connected');
       }
     }
   }
@@ -65,6 +47,6 @@ try {
   throw error;
 }
 
-// Export services
-export { auth, db };
+// Export services (Firestore only; auth is name+phone via API + localStorage)
+export { db };
 export default app;

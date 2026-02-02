@@ -332,6 +332,45 @@ export async function getFileMetadata(key: string): Promise<AWS.S3.HeadObjectOut
 }
 
 /**
+ * Generate a presigned URL for direct upload (PUT) to B2 from the browser.
+ * File never touches Vercel, so no 4.5MB body limit. Uses existing B2/S3-compatible client.
+ * Note: B2 bucket must have CORS configured to allow PUT from your app origin (see Backblaze CORS docs).
+ * @param key - Object key (path) in B2 bucket, e.g. uploads/userId/filename
+ * @param mimeType - Content-Type the client must send when PUTting
+ * @param expiresIn - URL expiration in seconds (default: 900 = 15 min)
+ * @returns Presigned PUT URL; client must PUT file with same Content-Type
+ */
+export function getSignedUploadUrl(key: string, mimeType: string, expiresIn: number = 900): string {
+  if (!B2_APPLICATION_KEY_ID || !B2_APPLICATION_KEY) {
+    throw new Error('B2 credentials are not configured. Please set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY environment variables.');
+  }
+
+  const params: AWS.S3.PutObjectRequest = {
+    Bucket: B2_BUCKET_NAME,
+    Key: key,
+    ContentType: mimeType,
+  };
+
+  try {
+    const signedUrl = s3.getSignedUrl('putObject', {
+      ...params,
+      Expires: expiresIn,
+    });
+    return signedUrl;
+  } catch (error: any) {
+    console.error('B2 presigned upload URL error:', error);
+    throw new Error(`Failed to generate upload URL: ${error.message}`);
+  }
+}
+
+/**
+ * Construct the B2 file URL for a given key (for storing in Firestore after direct upload).
+ */
+export function getFileUrlForKey(key: string): string {
+  return `${B2_ENDPOINT}/${B2_BUCKET_NAME}/${key}`;
+}
+
+/**
  * Generate a signed URL for direct B2 file download (much faster than server proxy)
  * @param key - Object key (path) to retrieve
  * @param expiresIn - URL expiration time in seconds (default: 300 = 5 minutes)

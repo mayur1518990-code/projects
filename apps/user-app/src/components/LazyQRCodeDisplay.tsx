@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
 
 // Lazy load the actual QRCodeDisplay component
 const QRCodeDisplay = dynamic(() => import("./QRCodeDisplay").then(mod => ({ default: mod.QRCodeDisplay })), {

@@ -148,7 +148,8 @@ export default function UploadPage() {
     };
   }, [user, loading]);
 
-  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  // Direct-to-B2 upload bypasses Vercel body limit; allow up to 100MB per file
+  const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
   const ALLOWED_TYPES = [
     "application/pdf",
     "image/jpeg",
@@ -182,43 +183,63 @@ export default function UploadPage() {
     [alerts, dismissedAlerts]
   );
 
+  // Direct-to-B2: get presigned URL (no file through Vercel), PUT file to B2, then complete
   const uploadFileToServer = useCallback(async (file: File) => {
     try {
-      // Use FormData for direct file upload instead of base64
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('userId', user?.userId || '');
-      formData.append('metadata', JSON.stringify({
-        uploadedVia: 'web',
-        userAgent: navigator.userAgent
-      }));
+      const mimeType = file.type || 'application/octet-stream';
+      const metadata = { uploadedVia: 'web', userAgent: navigator.userAgent };
 
-      // Add timeout protection for upload
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      const response = await fetch('/api/upload', {
+      // 1. Get presigned PUT URL (tiny JSON request; no file in body, bypasses 4.5MB limit)
+      const presignRes = await fetch('/api/upload/presign', {
         method: 'POST',
-        body: formData,
-        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.userId,
+          originalName: file.name,
+          size: file.size,
+          mimeType,
+          metadata,
+        }),
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+      const presignData = await presignRes.json().catch(() => ({}));
+      if (!presignRes.ok || !presignData.success) {
+        throw new Error(presignData.message || 'Failed to get upload URL');
       }
 
-      const result = await response.json();
+      const { uploadUrl, fileId, mimeType: signedMimeType } = presignData;
 
-      if (!result.success) {
-        throw new Error(result.message || 'Upload failed');
+      // 2. PUT file directly to B2 (file never touches Vercel)
+      const putController = new AbortController();
+      const putTimeoutId = setTimeout(() => putController.abort(), 300000); // 5 min for large files
+
+      const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': signedMimeType || mimeType },
+        signal: putController.signal,
+      });
+
+      clearTimeout(putTimeoutId);
+
+      if (!putRes.ok) {
+        throw new Error(`Upload to storage failed: ${putRes.status}. Please try again.`);
       }
 
-      // Notify other tabs that a new file was uploaded
+      // 3. Tell server to mark upload complete and set fileUrl
+      const completeRes = await fetch('/api/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId }),
+      });
+
+      const completeData = await completeRes.json().catch(() => ({}));
+      if (!completeRes.ok || !completeData.success) {
+        throw new Error(completeData.message || 'Failed to complete upload');
+      }
+
       localStorage.setItem('newFileUploaded', Date.now().toString());
-
-      return result.file;
+      return completeData.file;
     } catch (error: any) {
       if (error.name === 'AbortError') {
         throw new Error('Upload timeout - please try again');
@@ -237,37 +258,28 @@ export default function UploadPage() {
     setIsUploading(true);
 
     try {
-      const uploadPromises = Array.from(files).map(async (file) => {
-        // Validate file size
+      // Upload one file at a time to avoid 503 from Vercel concurrency/rate limits
+      const uploadedFiles: UploadedFile[] = [];
+      for (const file of Array.from(files)) {
         if (file.size === 0) {
           throw new Error(`File "${file.name}" is empty. Please select a valid file.`);
         }
-        
         if (file.size > MAX_FILE_SIZE) {
-          throw new Error(`File "${file.name}" is too large. Maximum size is 20MB.`);
+          throw new Error(`File "${file.name}" is too large. Maximum size is 100MB per file.`);
         }
-
-        // Validate file type
         if (!ALLOWED_TYPES.includes(file.type)) {
           throw new Error(`File "${file.name}" is not supported. Allowed types: PDF, images, Word docs, Excel, PowerPoint, text files, and archives.`);
         }
-
-        // Upload to server
         const uploadedFile = await uploadFileToServer(file);
-
-        const newFile: UploadedFile = {
+        uploadedFiles.push({
           id: uploadedFile.id,
           name: uploadedFile.originalName,
           size: uploadedFile.size,
           type: uploadedFile.mimeType,
           status: "pending",
           uploadDate: new Date(uploadedFile.uploadedAt),
-        };
-
-        return newFile;
-      });
-
-      const uploadedFiles = await Promise.all(uploadPromises);
+        });
+      }
       setUploadedFiles(prev => [...prev, ...uploadedFiles]);
     } catch (error: any) {
       setError(error.message || 'Upload failed. Please try again.');
@@ -443,7 +455,7 @@ export default function UploadPage() {
                   )}
                 </div>
                 <p className="text-xs sm:text-sm text-gray-500">
-                  PDF, DOC, DOCX, JPG, PNG, GIF, TXT, XLS, PPT, ZIP and more up to 20MB each
+                  PDF, DOC, DOCX, JPG, PNG, GIF, TXT, XLS, PPT, ZIP and more up to 100MB each (direct to B2)
                 </p>
               </div>
             </div>

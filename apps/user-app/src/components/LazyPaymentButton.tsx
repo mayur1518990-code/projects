@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
 
 // Lazy load the actual PaymentButton component
 const PaymentButton = dynamic(() => import("./PaymentButton").then(mod => ({ default: mod.PaymentButton })), {

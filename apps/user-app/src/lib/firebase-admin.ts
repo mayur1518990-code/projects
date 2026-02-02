@@ -1,5 +1,4 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
 // Normalize and parse the private key from env (handle escaped newlines from Vercel)
@@ -19,8 +18,7 @@ const firebaseAdminConfig = {
 // Initialize Firebase Admin
 const adminApp = getApps().length === 0 ? initializeApp(firebaseAdminConfig) : getApps()[0];
 
-// Initialize Firebase Admin services
-export const adminAuth = getAuth(adminApp);
+// Firestore only (auth is name+phone via API)
 export const adminDb = getFirestore(adminApp);
 
 export default adminApp;

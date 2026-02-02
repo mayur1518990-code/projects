@@ -58,9 +58,11 @@ const inferMimeFromFilename = (filename: string): string => {
   }
 };
 
+// Vercel serverless body limit is 4.5MB; cap at 4MB to avoid 503/413
+const MAX_REPLACE_BYTES = 4 * 1024 * 1024; // 4MB
+
 const validateFileSize = (size: number): boolean => {
-  const maxSize = 20 * 1024 * 1024; // 20MB
-  return size <= maxSize;
+  return size <= MAX_REPLACE_BYTES;
 };
 
 const generateUniqueFilename = (originalName: string): string => {
@@ -146,7 +148,7 @@ export async function POST(request: NextRequest) {
     
     if (!validateFileSize(size)) {
       return NextResponse.json(
-        { success: false, message: 'File size exceeds 20MB limit' },
+        { success: false, message: 'File size exceeds 4MB limit. Maximum upload size is 4MB per file.' },
         { status: 400 }
       );
     }

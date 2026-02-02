@@ -127,8 +127,8 @@ export default function EditFilePage() {
       return;
     }
 
-    if (file.size > 20 * 1024 * 1024) {
-      setError("File size exceeds 20MB limit.");
+    if (file.size > 4 * 1024 * 1024) {
+      setError("File size exceeds 4MB limit. Maximum upload size is 4MB per file.");
       return;
     }
 
