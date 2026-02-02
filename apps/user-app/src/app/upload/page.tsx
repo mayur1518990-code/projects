@@ -31,6 +31,8 @@ export default function UploadPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadStatusText, setUploadStatusText] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [authTimeout, setAuthTimeout] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -183,70 +185,110 @@ export default function UploadPage() {
     [alerts, dismissedAlerts]
   );
 
-  // Direct-to-B2: get presigned URL (no file through Vercel), PUT file to B2, then complete
-  const uploadFileToServer = useCallback(async (file: File) => {
-    try {
-      const mimeType = file.type || 'application/octet-stream';
-      const metadata = { uploadedVia: 'web', userAgent: navigator.userAgent };
+  // Direct-to-B2: get presigned URL (no file through Vercel), PUT file to B2 with progress, then complete
+  const uploadFileToServer = useCallback(
+    async (file: File, fileIndex: number, totalFiles: number) => {
+      try {
+        const mimeType = file.type || "application/octet-stream";
+        const metadata = { uploadedVia: "web", userAgent: navigator.userAgent };
 
-      // 1. Get presigned PUT URL (tiny JSON request; no file in body, bypasses 4.5MB limit)
-      const presignRes = await fetch('/api/upload/presign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user?.userId,
-          originalName: file.name,
-          size: file.size,
-          mimeType,
-          metadata,
-        }),
-      });
+        setUploadStatusText(
+          totalFiles > 1
+            ? `Preparing upload (${fileIndex + 1}/${totalFiles})...`
+            : "Preparing upload..."
+        );
 
-      const presignData = await presignRes.json().catch(() => ({}));
-      if (!presignRes.ok || !presignData.success) {
-        throw new Error(presignData.message || 'Failed to get upload URL');
+        // 1. Get presigned PUT URL (tiny JSON request; no file in body, bypasses 4.5MB limit)
+        const presignRes = await fetch("/api/upload/presign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user?.userId,
+            originalName: file.name,
+            size: file.size,
+            mimeType,
+            metadata,
+          }),
+        });
+
+        const presignData = await presignRes.json().catch(() => ({}));
+        if (!presignRes.ok || !presignData.success) {
+          throw new Error(presignData.message || "Failed to get upload URL");
+        }
+
+        const { uploadUrl, fileId, mimeType: signedMimeType } = presignData;
+
+        // 2. PUT file directly to B2 (file never touches Vercel) with progress
+        setUploadStatusText(
+          totalFiles > 1
+            ? `Uploading “${file.name}” (${fileIndex + 1}/${totalFiles})...`
+            : `Uploading “${file.name}”...`
+        );
+
+        const xhr = new XMLHttpRequest();
+
+        const putPromise = new Promise<void>((resolve, reject) => {
+          xhr.open("PUT", uploadUrl);
+          xhr.setRequestHeader(
+            "Content-Type",
+            (signedMimeType as string) || mimeType
+          );
+
+          xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) return;
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percent);
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              setUploadProgress(100);
+              resolve();
+            } else {
+              reject(
+                new Error(
+                  `Upload to storage failed: ${xhr.status}. Please try again.`
+                )
+              );
+            }
+          };
+
+          xhr.onerror = () => {
+            reject(new Error("Network error while uploading to storage."));
+          };
+
+          xhr.ontimeout = () => {
+            reject(new Error("Upload timeout - please try again."));
+          };
+
+          // 5 min timeout for large files
+          xhr.timeout = 300000;
+          xhr.send(file);
+        });
+
+        await putPromise;
+
+        // 3. Tell server to mark upload complete and set fileUrl
+        setUploadStatusText("Finalizing upload...");
+        const completeRes = await fetch("/api/upload/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId }),
+        });
+
+        const completeData = await completeRes.json().catch(() => ({}));
+        if (!completeRes.ok || !completeData.success) {
+          throw new Error(completeData.message || "Failed to complete upload");
+        }
+
+        localStorage.setItem("newFileUploaded", Date.now().toString());
+        return completeData.file;
+      } catch (error: any) {
+        throw error;
       }
-
-      const { uploadUrl, fileId, mimeType: signedMimeType } = presignData;
-
-      // 2. PUT file directly to B2 (file never touches Vercel)
-      const putController = new AbortController();
-      const putTimeoutId = setTimeout(() => putController.abort(), 300000); // 5 min for large files
-
-      const putRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': signedMimeType || mimeType },
-        signal: putController.signal,
-      });
-
-      clearTimeout(putTimeoutId);
-
-      if (!putRes.ok) {
-        throw new Error(`Upload to storage failed: ${putRes.status}. Please try again.`);
-      }
-
-      // 3. Tell server to mark upload complete and set fileUrl
-      const completeRes = await fetch('/api/upload/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId }),
-      });
-
-      const completeData = await completeRes.json().catch(() => ({}));
-      if (!completeRes.ok || !completeData.success) {
-        throw new Error(completeData.message || 'Failed to complete upload');
-      }
-
-      localStorage.setItem('newFileUploaded', Date.now().toString());
-      return completeData.file;
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        throw new Error('Upload timeout - please try again');
-      }
-      throw error;
-    }
-  }, [user?.userId]);
+    },
+    [user?.userId]
+  );
 
   const handleFiles = useCallback(async (files: FileList) => {
     if (!user) {
@@ -256,11 +298,15 @@ export default function UploadPage() {
 
     setError("");
     setIsUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText("Starting upload...");
 
     try {
       // Upload one file at a time to avoid 503 from Vercel concurrency/rate limits
+      const fileList = Array.from(files);
       const uploadedFiles: UploadedFile[] = [];
-      for (const file of Array.from(files)) {
+      for (let index = 0; index < fileList.length; index++) {
+        const file = fileList[index];
         if (file.size === 0) {
           throw new Error(`File "${file.name}" is empty. Please select a valid file.`);
         }
@@ -270,7 +316,7 @@ export default function UploadPage() {
         if (!ALLOWED_TYPES.includes(file.type)) {
           throw new Error(`File "${file.name}" is not supported. Allowed types: PDF, images, Word docs, Excel, PowerPoint, text files, and archives.`);
         }
-        const uploadedFile = await uploadFileToServer(file);
+        const uploadedFile = await uploadFileToServer(file, index, fileList.length);
         uploadedFiles.push({
           id: uploadedFile.id,
           name: uploadedFile.originalName,
@@ -285,6 +331,8 @@ export default function UploadPage() {
       setError(error.message || 'Upload failed. Please try again.');
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
+      setUploadStatusText("");
     }
   }, [user]);
 
@@ -437,9 +485,26 @@ export default function UploadPage() {
                 </div>
                 <div>
                   {isUploading ? (
-                    <div className="flex items-center justify-center space-x-2">
-                      <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-blue-600"></div>
-                      <span className="text-blue-600 font-medium text-base sm:text-lg">Uploading files...</span>
+                    <div className="space-y-3 sm:space-y-4">
+                      <div className="flex items-center justify-center space-x-2">
+                        <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-blue-600"></div>
+                        <span className="text-blue-600 font-medium text-base sm:text-lg">
+                          {uploadStatusText || "Uploading files..."}
+                        </span>
+                      </div>
+                      {uploadProgress !== null && (
+                        <div className="w-full max-w-md mx-auto">
+                          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-2 bg-blue-600 transition-all duration-150"
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {uploadProgress}% completed
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <>
