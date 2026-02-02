@@ -12,7 +12,6 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "cleanup-b2": "tsx scripts/cleanup-b2-hidden-files.ts",
-    "set-b2-cors": "tsx scripts/set-b2-cors.ts",
     "sync-firestore": "tsx scripts/sync-firestore-with-b2.ts",
     "sync-firestore:dry-run": "tsx scripts/sync-firestore-with-b2.ts --dry-run",
     "sync-firestore:delete": "tsx scripts/sync-firestore-with-b2.ts --delete-orphans",
